@@ -89,7 +89,7 @@ class EnhancedVideoDownloader:
         url_lower = url.lower()
         
         # Direct video files
-        if any(ext in url_lower for ext in ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm']):
+        if any(ext in url_lower for ext in ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.3gp']):
             return 'direct_video'
         
         # Social media platforms
@@ -112,8 +112,12 @@ class EnhancedVideoDownloader:
         elif 'facebook.com' in url_lower:
             return 'facebook'
         
-        # Generic video platforms
-        elif any(site in url_lower for site in ['bilibili', 'nicovideo', 'rutube']):
+        # Known video platforms
+        elif any(site in url_lower for site in ['bilibili', 'nicovideo', 'rutube', 'vk.com', 'ok.ru']):
+            return 'generic_video'
+        
+        # If it's a web URL but not a known platform, treat as generic
+        elif url_lower.startswith(('http://', 'https://')):
             return 'generic_video'
         
         return 'unknown'
@@ -376,12 +380,121 @@ class EnhancedVideoDownloader:
             logger.error(f"Direct video download failed: {e}")
             raise
     
+    def download_generic_video(self, url: str, quality: str = "best", format: str = "mp4", audio_only: bool = False) -> str:
+        """Generic video downloader for unknown platforms"""
+        logger.info(f"Attempting generic video download from: {url}")
+        
+        # Enhanced yt-dlp options for generic sites
+        ydl_opts = {
+            'outtmpl': str(self.download_dir / '%(title)s.%(ext)s'),
+            'format': f'best[ext={format}]/best' if format else 'best',
+            'noplaylist': True,
+            'ignoreerrors': False,
+            'no_check_certificate': True,
+            'prefer_insecure': True,
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'extractor_retries': 5,
+            'fragment_retries': 5,
+            'retries': 5,
+            'sleep_interval': 1,
+            'max_sleep_interval': 5,
+            # Enhanced headers for generic sites
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Accept-Encoding': 'gzip, deflate',
+                'DNT': '1',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Cache-Control': 'max-age=0'
+            },
+            # Force generic extractor for unknown sites
+            'force_generic_extractor': True,
+            # Additional options for streaming sites
+            'extractor_args': {
+                'generic': {
+                    'skip': ['dash', 'live']
+                }
+            }
+        }
+        
+        if audio_only:
+            ydl_opts.update({
+                'format': 'bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio',
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': '192',
+                }],
+            })
+        
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                logger.info("Starting generic video download with enhanced options...")
+                
+                # First, try to extract info to see what we're dealing with
+                try:
+                    info = ydl.extract_info(url, download=False)
+                    logger.info(f"Extracted info: {info.get('title', 'Unknown')} - {info.get('duration', 'Unknown duration')}")
+                    
+                    # Check if we got actual video info
+                    if not info.get('formats'):
+                        logger.warning("No video formats found, this might be a protected site")
+                        raise Exception("No video formats available")
+                        
+                except Exception as e:
+                    logger.warning(f"Could not extract video info: {e}")
+                    # Continue with download attempt anyway
+                
+                # Attempt download
+                ydl.download([url])
+                
+                # Get the downloaded file
+                info = ydl.extract_info(url, download=False)
+                title = info.get('title', 'unknown_title')
+                ext = info.get('ext', format or 'mp4')
+                filename = f"{title}.{ext}"
+                filepath = self.download_dir / filename
+                
+                if filepath.exists():
+                    # Check file size to ensure it's actually a video
+                    file_size = filepath.stat().st_size
+                    if file_size < 100000:  # Less than 100KB is suspicious
+                        logger.warning(f"Downloaded file is very small ({file_size} bytes), might be an error page")
+                        # Try to read the file to see if it's HTML
+                        try:
+                            with open(filepath, 'r', encoding='utf-8') as f:
+                                content = f.read(1000)  # Read first 1000 chars
+                                if '<html' in content.lower() or '<!doctype' in content.lower():
+                                    logger.error(f"Downloaded file appears to be HTML, not a video: {filepath}")
+                                    filepath.unlink()  # Delete the file
+                                    raise Exception("Downloaded HTML instead of video - site may require authentication or be protected")
+                        except UnicodeDecodeError:
+                            # File is binary, might be a small video or error
+                            if file_size < 50000:  # Very small binary file
+                                logger.error(f"Downloaded file is too small ({file_size} bytes) to be a valid video: {filepath}")
+                                filepath.unlink()
+                                raise Exception("Downloaded file is too small to be a valid video")
+                    
+                    logger.info(f"Successfully downloaded generic video: {filename} ({file_size} bytes)")
+                    return str(filepath)
+                else:
+                    raise Exception(f"Download completed but file not found: {filename}")
+                    
+        except Exception as e:
+            logger.error(f"Generic video download failed: {e}")
+            raise
+
     def download_video(self, url: str, quality: str = "best", format: str = "mp4", audio_only: bool = False) -> str:
         """Download video using multiple methods with fallback"""
         platform = self.detect_platform(url)
         logger.info(f"Detected platform: {platform} for URL: {url}")
         
-        # Method 1: Direct video download (highest priority)
+        # Method 1: Direct video download (only for actual video files)
         if platform == 'direct_video':
             try:
                 logger.info("Attempting direct video download...")
@@ -404,12 +517,21 @@ class EnhancedVideoDownloader:
             except Exception as e:
                 logger.warning(f"pytube download failed: {e}")
         
-        # Method 4: Direct video as fallback
-        try:
-            logger.info("Attempting direct video download as fallback...")
-            return self.download_direct_video(url)
-        except Exception as e:
-            logger.warning(f"Direct video fallback failed: {e}")
+        # Method 4: Generic downloader for unknown platforms
+        if platform == 'unknown' or platform == 'generic_video':
+            try:
+                logger.info("Attempting generic video download...")
+                return self.download_generic_video(url, quality, format, audio_only)
+            except Exception as e:
+                logger.warning(f"Generic video download failed: {e}")
+        
+        # Method 5: Direct video as last resort (only for non-HTML URLs)
+        if not any(html_indicator in url.lower() for html_indicator in ['html', 'htm', 'php', 'asp', 'jsp']):
+            try:
+                logger.info("Attempting direct video download as last resort...")
+                return self.download_direct_video(url)
+            except Exception as e:
+                logger.warning(f"Direct video fallback failed: {e}")
         
         # If all methods fail
         raise Exception(f"All download methods failed for URL: {url}")
