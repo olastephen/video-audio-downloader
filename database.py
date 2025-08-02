@@ -3,11 +3,12 @@ import logging
 import os
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-from sqlalchemy import Column, String, Float, Integer, DateTime, Text, create_engine
+from sqlalchemy import Column, String, Float, Integer, DateTime, Text, create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy_utils import database_exists, create_database
 
 logger = logging.getLogger(__name__)
 
@@ -116,13 +117,73 @@ class DatabaseManager:
     
     async def init_db(self):
         """Initialize database and create tables"""
-        async with self.engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        try:
+            # First, try to create the database if it doesn't exist
+            await self._ensure_database_exists()
+            
+            # Then create tables
+            async with self.engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            
+            if USE_POSTGRESQL:
+                logger.info("PostgreSQL database initialized successfully")
+            else:
+                logger.info("SQLite database initialized successfully")
+                
+        except Exception as e:
+            logger.error(f"Database initialization failed: {e}")
+            raise
+    
+    async def _ensure_database_exists(self):
+        """Ensure the database exists, create it if it doesn't"""
+        if not USE_POSTGRESQL:
+            return  # SQLite creates databases automatically
         
-        if USE_POSTGRESQL:
-            logger.info("PostgreSQL database initialized successfully")
-        else:
-            logger.info("SQLite database initialized successfully")
+        try:
+            # Try to connect to the database
+            async with self.engine.begin() as conn:
+                await conn.execute(text("SELECT 1"))
+                logger.info("Database connection test successful")
+        except Exception as e:
+            logger.warning(f"Database connection test failed: {e}")
+            logger.info("Attempting to create database...")
+            
+            # Try to create the database using a simpler approach
+            try:
+                # Connect to postgres database to create our database
+                from sqlalchemy import create_engine
+                
+                # Create a connection string to the postgres database
+                postgres_url = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/postgres"
+                postgres_engine = create_engine(postgres_url)
+                
+                # Try to create the database
+                with postgres_engine.connect() as conn:
+                    conn.execute(text(f"CREATE DATABASE {DB_NAME}"))
+                    conn.commit()
+                    logger.info(f"Database '{DB_NAME}' created successfully")
+                    
+            except Exception as create_error:
+                logger.error(f"Failed to create database: {create_error}")
+                # Try alternative approach without sqlalchemy-utils
+                try:
+                    import psycopg2
+                    conn = psycopg2.connect(
+                        host=DB_HOST,
+                        port=DB_PORT,
+                        user=DB_USER,
+                        password=DB_PASSWORD,
+                        database='postgres'
+                    )
+                    conn.autocommit = True
+                    cursor = conn.cursor()
+                    cursor.execute(f"CREATE DATABASE {DB_NAME}")
+                    cursor.close()
+                    conn.close()
+                    logger.info(f"Database '{DB_NAME}' created successfully using psycopg2")
+                except Exception as psycopg2_error:
+                    logger.error(f"Failed to create database with psycopg2: {psycopg2_error}")
+                    raise Exception(f"Database '{DB_NAME}' does not exist and could not be created. Please create it manually or check permissions.")
     
     async def create_task(self, task_data: Dict[str, Any]) -> DownloadTask:
         """Create a new download task"""
