@@ -8,11 +8,11 @@ class Config:
     """Configuration class for the Video Downloader API"""
     
     # Database Configuration
-    DB_HOST = os.getenv('DB_HOST', 'localhost')
-    DB_PORT = os.getenv('DB_PORT', '40211')  # Updated to match Docker port mapping
-    DB_NAME = os.getenv('DB_NAME', 'video_downloader')
-    DB_USER = os.getenv('DB_USER', 'video_downloader')
-    DB_PASSWORD = os.getenv('DB_PASSWORD', 'secure_password_123')
+    DB_HOST = os.getenv('DB_HOST', '172.17.0.1')  # Docker network IP
+    DB_PORT = os.getenv('DB_PORT', '40211')  # Docker mapped port
+    DB_NAME = os.getenv('POSTGRES1_DB', 'video_downloader')  # Match Docker env var
+    DB_USER = os.getenv('POSTGRES1_USER', 'video_downloader')  # Match Docker env var
+    DB_PASSWORD = os.getenv('POSTGRES1_PASSWORD', 'secure_password_123')  # Match Docker env var
     
     # MinIO Configuration
     MINIO_ENDPOINT = os.getenv('MINIO_ENDPOINT', 'minio-u39275.vm.elestio.app:34256')

@@ -1,0 +1,23 @@
+# Database Configuration (matches Docker setup)
+DB_HOST=172.17.0.1
+DB_PORT=40211
+POSTGRES1_DB=video_downloader
+POSTGRES1_USER=video_downloader
+POSTGRES1_PASSWORD=secure_password_123
+
+# MinIO Configuration
+MINIO_ENDPOINT=minio-u39275.vm.elestio.app:34256
+MINIO_ACCESS_KEY=root
+MINIO_SECRET_KEY=o86Lv2Ta-x1rk-SHd5RK0B
+MINIO_SECURE=true
+MINIO_BUCKET=video-downloads
+
+# API Configuration
+API_HOST=0.0.0.0
+API_PORT=8000
+DEBUG=false
+
+# Download Configuration
+MAX_DOWNLOAD_SIZE=1073741824
+DOWNLOAD_TIMEOUT=300
+LOCAL_STORAGE_FALLBACK=false 

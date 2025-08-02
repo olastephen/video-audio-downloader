@@ -21,18 +21,18 @@ try:
     DB_PASSWORD = Config.DB_PASSWORD
     logger.info(f"Using Config: {DB_HOST}:{DB_PORT}/{DB_NAME}")
 except ImportError:
-    DB_HOST = os.getenv('DB_HOST', 'localhost')
-    DB_PORT = os.getenv('DB_PORT', '40211')  # Updated to match Docker port
-    DB_NAME = os.getenv('DB_NAME', 'video_downloader')
-    DB_USER = os.getenv('DB_USER', 'video_downloader')
-    DB_PASSWORD = os.getenv('DB_PASSWORD', 'secure_password_123')
+    DB_HOST = os.getenv('DB_HOST', '172.17.0.1')  # Docker network IP
+    DB_PORT = os.getenv('DB_PORT', '40211')  # Docker mapped port
+    DB_NAME = os.getenv('POSTGRES1_DB', 'video_downloader')  # Match Docker env var
+    DB_USER = os.getenv('POSTGRES1_USER', 'video_downloader')  # Match Docker env var
+    DB_PASSWORD = os.getenv('POSTGRES1_PASSWORD', 'secure_password_123')  # Match Docker env var
     logger.warning("Config not available, using fallback database configuration")
 
 # Validate database URL (ensure port is not empty)
 if not DB_PORT or DB_PORT == '':
     DB_PORT = '40211'  # Default to Docker port
 
-# Enable PostgreSQL connection
+# Enable PostgreSQL connection with fallback
 USE_POSTGRESQL = True
 engine = None
 
@@ -53,7 +53,25 @@ if USE_POSTGRESQL:
         
     except Exception as e:
         logger.warning(f"PostgreSQL connection failed: {e}")
-        USE_POSTGRESQL = False
+        # Try localhost as fallback
+        try:
+            fallback_host = 'localhost'
+            DATABASE_URL = f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}@{fallback_host}:{DB_PORT}/{DB_NAME}"
+            logger.info(f"Attempting PostgreSQL connection with localhost fallback: {fallback_host}:{DB_PORT}/{DB_NAME}")
+            
+            engine = create_async_engine(
+                DATABASE_URL,
+                echo=False,
+                pool_size=20,
+                max_overflow=30,
+                pool_pre_ping=True,
+                pool_recycle=3600
+            )
+            logger.info("PostgreSQL engine created successfully with localhost fallback")
+            
+        except Exception as e2:
+            logger.warning(f"PostgreSQL localhost fallback also failed: {e2}")
+            USE_POSTGRESQL = False
 
 if not USE_POSTGRESQL:
     logger.info("Falling back to SQLite database")
