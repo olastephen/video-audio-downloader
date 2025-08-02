@@ -1,9 +1,10 @@
 # Database Configuration (Elestio DbGate)
 DB_HOST=dbgate-u39275.vm.elestio.app
-DB_PORT=5432
+DB_PORT=40211
 POSTGRES1_DB=video_downloader
-POSTGRES1_USER=admin
+POSTGRES1_USER=postgres
 POSTGRES1_PASSWORD=G5oRd5V2-fPR7-XUyvX6VG
+ALLOW_SQLITE_FALLBACK=false
 
 # MinIO Configuration
 MINIO_ENDPOINT=minio-u39275.vm.elestio.app:34256

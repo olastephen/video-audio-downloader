@@ -9,10 +9,11 @@ class Config:
     
     # Database Configuration
     DB_HOST = os.getenv('DB_HOST', 'dbgate-u39275.vm.elestio.app')  # Elestio DbGate host
-    DB_PORT = os.getenv('DB_PORT', '5432')  # PostgreSQL default port
+    DB_PORT = os.getenv('DB_PORT', '40211')  # PostgreSQL port from Docker Compose
     DB_NAME = os.getenv('POSTGRES1_DB', 'video_downloader')  # Database name
-    DB_USER = os.getenv('POSTGRES1_USER', 'admin')  # DbGate admin user
-    DB_PASSWORD = os.getenv('POSTGRES1_PASSWORD', 'G5oRd5V2-fPR7-XUyvX6VG')  # DbGate admin password
+    DB_USER = os.getenv('POSTGRES1_USER', 'postgres')  # DbGate postgres user
+    DB_PASSWORD = os.getenv('POSTGRES1_PASSWORD', 'G5oRd5V2-fPR7-XUyvX6VG')  # DbGate postgres password
+    ALLOW_SQLITE_FALLBACK = os.getenv('ALLOW_SQLITE_FALLBACK', 'false').lower() == 'true'  # Disable for production
     
     # MinIO Configuration
     MINIO_ENDPOINT = os.getenv('MINIO_ENDPOINT', 'minio-u39275.vm.elestio.app:34256')

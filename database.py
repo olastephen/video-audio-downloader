@@ -19,21 +19,23 @@ try:
     DB_NAME = Config.DB_NAME
     DB_USER = Config.DB_USER
     DB_PASSWORD = Config.DB_PASSWORD
+    ALLOW_SQLITE_FALLBACK = Config.ALLOW_SQLITE_FALLBACK
     logger.info(f"Using Config: {DB_HOST}:{DB_PORT}/{DB_NAME}")
 except ImportError:
     DB_HOST = os.getenv('DB_HOST', 'dbgate-u39275.vm.elestio.app')  # Elestio DbGate host
-    DB_PORT = os.getenv('DB_PORT', '5432')  # PostgreSQL default port
+    DB_PORT = os.getenv('DB_PORT', '40211')  # PostgreSQL port from Docker Compose
     DB_NAME = os.getenv('POSTGRES1_DB', 'video_downloader')  # Database name
-    DB_USER = os.getenv('POSTGRES1_USER', 'admin')  # DbGate admin user
-    DB_PASSWORD = os.getenv('POSTGRES1_PASSWORD', 'G5oRd5V2-fPR7-XUyvX6VG')  # DbGate admin password
+    DB_USER = os.getenv('POSTGRES1_USER', 'postgres')  # DbGate postgres user
+    DB_PASSWORD = os.getenv('POSTGRES1_PASSWORD', 'G5oRd5V2-fPR7-XUyvX6VG')  # DbGate postgres password
+    ALLOW_SQLITE_FALLBACK = os.getenv('ALLOW_SQLITE_FALLBACK', 'false').lower() == 'true'
     logger.warning("Config not available, using fallback database configuration")
 
 # Validate database URL (ensure port is not empty)
 if not DB_PORT or DB_PORT == '':
-    DB_PORT = '5432'  # Default to internal Docker port
+    DB_PORT = '40211'  # Default to Docker Compose port
 
 # Enable PostgreSQL connection with fallback
-USE_POSTGRESQL = True
+USE_POSTGRESQL = True # Always use PostgreSQL
 engine = None
 
 if USE_POSTGRESQL:
@@ -47,42 +49,41 @@ if USE_POSTGRESQL:
             pool_size=20,
             max_overflow=30,
             pool_pre_ping=True,
-            pool_recycle=3600
+            pool_recycle=3600,
+            connect_args={
+                "server_settings": {
+                    "application_name": "video_downloader_api"
+                }
+            }
         )
         logger.info("PostgreSQL engine created successfully")
         
     except Exception as e:
-        logger.warning(f"PostgreSQL connection failed: {e}")
-        # Try localhost as fallback
-        try:
-            fallback_host = 'localhost'
-            DATABASE_URL = f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}@{fallback_host}:{DB_PORT}/{DB_NAME}"
-            logger.info(f"Attempting PostgreSQL connection with localhost fallback: {fallback_host}:{DB_PORT}/{DB_NAME}")
-            
-            engine = create_async_engine(
-                DATABASE_URL,
-                echo=False,
-                pool_size=20,
-                max_overflow=30,
-                pool_pre_ping=True,
-                pool_recycle=3600
-            )
-            logger.info("PostgreSQL engine created successfully with localhost fallback")
-            
-        except Exception as e2:
-            logger.warning(f"PostgreSQL localhost fallback also failed: {e2}")
-            USE_POSTGRESQL = False
+        logger.error(f"PostgreSQL connection failed: {e}")
+        logger.error("Cannot connect to PostgreSQL database. Please check:")
+        logger.error("1. Database server is running and accessible")
+        logger.error("2. Network connectivity and firewall settings")
+        logger.error("3. Database credentials and permissions")
+        logger.error("4. Port configuration in Docker Compose")
+        USE_POSTGRESQL = False
 
 if not USE_POSTGRESQL:
-    logger.info("Falling back to SQLite database")
-    import aiosqlite
-    DATABASE_URL = "sqlite+aiosqlite:///./video_downloader.db"
-    engine = create_async_engine(
-        DATABASE_URL,
-        echo=False,
-        pool_pre_ping=True
-    )
-    logger.info("SQLite engine created successfully")
+    if ALLOW_SQLITE_FALLBACK:
+        logger.warning("PostgreSQL connection failed, falling back to SQLite database")
+        logger.warning("This is not recommended for production hosting!")
+        logger.warning("Please fix the PostgreSQL connection for production use.")
+        import aiosqlite
+        DATABASE_URL = "sqlite+aiosqlite:///./video_downloader.db"
+        engine = create_async_engine(
+            DATABASE_URL,
+            echo=False,
+            pool_pre_ping=True
+        )
+        logger.info("SQLite engine created successfully")
+    else:
+        logger.error("PostgreSQL connection failed and SQLite fallback is disabled")
+        logger.error("Cannot start application without database connection")
+        raise Exception("Database connection failed. Please check PostgreSQL configuration.")
 
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
