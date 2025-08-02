@@ -1,14 +1,13 @@
 import asyncio
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from sqlalchemy import Column, String, Float, Integer, DateTime, Text, create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy_utils import database_exists, create_database
 
 logger = logging.getLogger(__name__)
 
@@ -22,16 +21,16 @@ try:
     DB_PASSWORD = Config.DB_PASSWORD
     logger.info(f"Using Config: {DB_HOST}:{DB_PORT}/{DB_NAME}")
 except ImportError:
-    DB_HOST = os.getenv('DB_HOST', '172.17.0.1')  # Docker network IP
-    DB_PORT = os.getenv('DB_PORT', '40211')  # Docker mapped port
-    DB_NAME = os.getenv('POSTGRES1_DB', 'video_downloader')  # Match Docker env var
-    DB_USER = os.getenv('POSTGRES1_USER', 'video_downloader')  # Match Docker env var
-    DB_PASSWORD = os.getenv('POSTGRES1_PASSWORD', 'secure_password_123')  # Match Docker env var
+    DB_HOST = os.getenv('DB_HOST', 'dbgate-u39275.vm.elestio.app')  # Elestio DbGate host
+    DB_PORT = os.getenv('DB_PORT', '5432')  # PostgreSQL default port
+    DB_NAME = os.getenv('POSTGRES1_DB', 'video_downloader')  # Database name
+    DB_USER = os.getenv('POSTGRES1_USER', 'admin')  # DbGate admin user
+    DB_PASSWORD = os.getenv('POSTGRES1_PASSWORD', 'G5oRd5V2-fPR7-XUyvX6VG')  # DbGate admin password
     logger.warning("Config not available, using fallback database configuration")
 
 # Validate database URL (ensure port is not empty)
 if not DB_PORT or DB_PORT == '':
-    DB_PORT = '40211'  # Default to Docker port
+    DB_PORT = '5432'  # Default to internal Docker port
 
 # Enable PostgreSQL connection with fallback
 USE_POSTGRESQL = True
@@ -148,42 +147,35 @@ class DatabaseManager:
             logger.warning(f"Database connection test failed: {e}")
             logger.info("Attempting to create database...")
             
-            # Try to create the database using a simpler approach
+            # Try to create the database using psycopg2
             try:
-                # Connect to postgres database to create our database
-                from sqlalchemy import create_engine
+                import psycopg2
+                conn = psycopg2.connect(
+                    host=DB_HOST,
+                    port=DB_PORT,
+                    user=DB_USER,
+                    password=DB_PASSWORD,
+                    database='postgres'
+                )
+                conn.autocommit = True
+                cursor = conn.cursor()
                 
-                # Create a connection string to the postgres database
-                postgres_url = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/postgres"
-                postgres_engine = create_engine(postgres_url)
+                # Check if database exists
+                cursor.execute("SELECT 1 FROM pg_database WHERE datname = %s", (DB_NAME,))
+                exists = cursor.fetchone()
                 
-                # Try to create the database
-                with postgres_engine.connect() as conn:
-                    conn.execute(text(f"CREATE DATABASE {DB_NAME}"))
-                    conn.commit()
+                if not exists:
+                    cursor.execute(f"CREATE DATABASE {DB_NAME}")
                     logger.info(f"Database '{DB_NAME}' created successfully")
+                else:
+                    logger.info(f"Database '{DB_NAME}' already exists")
+                
+                cursor.close()
+                conn.close()
                     
             except Exception as create_error:
                 logger.error(f"Failed to create database: {create_error}")
-                # Try alternative approach without sqlalchemy-utils
-                try:
-                    import psycopg2
-                    conn = psycopg2.connect(
-                        host=DB_HOST,
-                        port=DB_PORT,
-                        user=DB_USER,
-                        password=DB_PASSWORD,
-                        database='postgres'
-                    )
-                    conn.autocommit = True
-                    cursor = conn.cursor()
-                    cursor.execute(f"CREATE DATABASE {DB_NAME}")
-                    cursor.close()
-                    conn.close()
-                    logger.info(f"Database '{DB_NAME}' created successfully using psycopg2")
-                except Exception as psycopg2_error:
-                    logger.error(f"Failed to create database with psycopg2: {psycopg2_error}")
-                    raise Exception(f"Database '{DB_NAME}' does not exist and could not be created. Please create it manually or check permissions.")
+                raise Exception(f"Database '{DB_NAME}' does not exist and could not be created. Please create it manually or check permissions.")
     
     async def create_task(self, task_data: Dict[str, Any]) -> DownloadTask:
         """Create a new download task"""
@@ -289,7 +281,6 @@ class DatabaseManager:
     
     async def cleanup_old_tasks(self, days: int = 7) -> int:
         """Clean up tasks older than specified days"""
-        from datetime import timedelta
         cutoff_date = datetime.utcnow() - timedelta(days=days)
         
         async with self.async_session() as session:
@@ -320,7 +311,6 @@ class DatabaseManager:
                 status_stats[status] = len(result.scalars().all())
             
             # Recent activity (last 24 hours)
-            from datetime import timedelta
             recent_cutoff = datetime.utcnow() - timedelta(hours=24)
             recent_result = await session.execute(
                 select(DownloadTask).where(DownloadTask.created_at >= recent_cutoff)

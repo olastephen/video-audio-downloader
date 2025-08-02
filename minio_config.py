@@ -19,6 +19,7 @@ class MinIOStorage:
             self.secret_key = Config.MINIO_SECRET_KEY
             self.secure = Config.MINIO_SECURE
             self.bucket_name = Config.MINIO_BUCKET
+            self.url_expiry = Config.MINIO_URL_EXPIRY
             logger.info(f"Using Config class for MinIO settings")
             logger.info(f"MinIO endpoint from config: {self.endpoint}")
         except ImportError:
@@ -28,6 +29,7 @@ class MinIOStorage:
             self.secret_key = os.getenv('MINIO_SECRET_KEY', 'o86Lv2Ta-x1rk-SHd5RK0B')
             self.secure = os.getenv('MINIO_SECURE', 'true').lower() == 'true'
             self.bucket_name = os.getenv('MINIO_BUCKET', 'video-downloads')
+            self.url_expiry = int(os.getenv('MINIO_URL_EXPIRY', '86400'))
             logger.info(f"Using environment variables for MinIO settings")
             logger.info(f"MinIO endpoint from env: {self.endpoint}")
         
@@ -107,12 +109,12 @@ class MinIOStorage:
                 file_path=file_path
             )
             
-            # Generate presigned URL for download (valid for 24 hours)
+            # Generate presigned URL for download (valid for configured time)
             from datetime import timedelta
             download_url = self.client.presigned_get_object(
                 bucket_name=self.bucket_name,
                 object_name=object_name,
-                expires=timedelta(hours=24)  # 24 hours
+                expires=timedelta(seconds=self.url_expiry)
             )
             
             # Get object info
@@ -248,13 +250,13 @@ class MinIOStorage:
             logger.error(f"Error listing files: {e}")
             return []
     
-    def generate_download_url(self, object_name: str, expires: int = 86400) -> Optional[str]:
+    def generate_download_url(self, object_name: str, expires: int = None) -> Optional[str]:
         """
         Generate a presigned download URL
         
         Args:
             object_name: Name of the object
-            expires: URL expiration time in seconds (default 24 hours)
+            expires: URL expiration time in seconds (defaults to MINIO_URL_EXPIRY from config)
             
         Returns:
             Presigned URL or None if error
@@ -264,6 +266,10 @@ class MinIOStorage:
         
         try:
             from datetime import timedelta
+            # Use configured expiry time if not specified
+            if expires is None:
+                expires = self.url_expiry
+                
             return self.client.presigned_get_object(
                 bucket_name=self.bucket_name,
                 object_name=object_name,

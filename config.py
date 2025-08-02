@@ -8,11 +8,11 @@ class Config:
     """Configuration class for the Video Downloader API"""
     
     # Database Configuration
-    DB_HOST = os.getenv('DB_HOST', '172.17.0.1')  # Docker network IP
-    DB_PORT = os.getenv('DB_PORT', '40211')  # Docker mapped port
-    DB_NAME = os.getenv('POSTGRES1_DB', 'video_downloader')  # Match Docker env var
-    DB_USER = os.getenv('POSTGRES1_USER', 'video_downloader')  # Match Docker env var
-    DB_PASSWORD = os.getenv('POSTGRES1_PASSWORD', 'secure_password_123')  # Match Docker env var
+    DB_HOST = os.getenv('DB_HOST', 'dbgate-u39275.vm.elestio.app')  # Elestio DbGate host
+    DB_PORT = os.getenv('DB_PORT', '5432')  # PostgreSQL default port
+    DB_NAME = os.getenv('POSTGRES1_DB', 'video_downloader')  # Database name
+    DB_USER = os.getenv('POSTGRES1_USER', 'admin')  # DbGate admin user
+    DB_PASSWORD = os.getenv('POSTGRES1_PASSWORD', 'G5oRd5V2-fPR7-XUyvX6VG')  # DbGate admin password
     
     # MinIO Configuration
     MINIO_ENDPOINT = os.getenv('MINIO_ENDPOINT', 'minio-u39275.vm.elestio.app:34256')
@@ -20,6 +20,7 @@ class Config:
     MINIO_SECRET_KEY = os.getenv('MINIO_SECRET_KEY', 'o86Lv2Ta-x1rk-SHd5RK0B')
     MINIO_SECURE = os.getenv('MINIO_SECURE', 'true').lower() == 'true'
     MINIO_BUCKET = os.getenv('MINIO_BUCKET', 'video-downloads')
+    MINIO_URL_EXPIRY = int(os.getenv('MINIO_URL_EXPIRY', '86400'))  # 24 hours in seconds
     
     # API Configuration
     API_HOST = os.getenv('API_HOST', '0.0.0.0')
@@ -45,6 +46,7 @@ class Config:
         print("=== Video Downloader API Configuration ===")
         print(f"Database: {cls.DB_HOST}:{cls.DB_PORT}/{cls.DB_NAME}")
         print(f"MinIO: {cls.MINIO_ENDPOINT}/{cls.MINIO_BUCKET}")
+        print(f"MinIO URL Expiry: {cls.MINIO_URL_EXPIRY} seconds")
         print(f"API: {cls.API_HOST}:{cls.API_PORT}")
         print(f"Debug: {cls.DEBUG}")
         print(f"Max Download Size: {cls.MAX_DOWNLOAD_SIZE} bytes")
