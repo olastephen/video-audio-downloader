@@ -22,7 +22,7 @@ try:
     logger.info(f"Using Config: {DB_HOST}:{DB_PORT}/{DB_NAME}")
 except ImportError:
     DB_HOST = os.getenv('DB_HOST', 'localhost')
-    DB_PORT = os.getenv('DB_PORT', '5432')
+    DB_PORT = os.getenv('DB_PORT', '40211')  # Updated to match Docker port
     DB_NAME = os.getenv('DB_NAME', 'video_downloader')
     DB_USER = os.getenv('DB_USER', 'video_downloader')
     DB_PASSWORD = os.getenv('DB_PASSWORD', 'secure_password_123')
@@ -30,10 +30,10 @@ except ImportError:
 
 # Validate database URL (ensure port is not empty)
 if not DB_PORT or DB_PORT == '':
-    DB_PORT = '5432'
+    DB_PORT = '40211'  # Default to Docker port
 
-# Force SQLite for now since PostgreSQL is not accessible
-USE_POSTGRESQL = False
+# Enable PostgreSQL connection
+USE_POSTGRESQL = True
 engine = None
 
 if USE_POSTGRESQL:
@@ -56,7 +56,7 @@ if USE_POSTGRESQL:
         USE_POSTGRESQL = False
 
 if not USE_POSTGRESQL:
-    logger.info("Using SQLite database")
+    logger.info("Falling back to SQLite database")
     import aiosqlite
     DATABASE_URL = "sqlite+aiosqlite:///./video_downloader.db"
     engine = create_async_engine(

@@ -8,11 +8,11 @@ class Config:
     """Configuration class for the Video Downloader API"""
     
     # Database Configuration
-    DB_HOST = os.getenv('DB_HOST', 'https://dbgate-u39275.vm.elestio.app')
-    DB_PORT = os.getenv('DB_PORT', '3306')
+    DB_HOST = os.getenv('DB_HOST', 'localhost')
+    DB_PORT = os.getenv('DB_PORT', '40211')  # Updated to match Docker port mapping
     DB_NAME = os.getenv('DB_NAME', 'video_downloader')
-    DB_USER = os.getenv('DB_USER', 'admin')
-    DB_PASSWORD = os.getenv('DB_PASSWORD', 'G5oRd5V2-fPR7-XUyvX6VG')
+    DB_USER = os.getenv('DB_USER', 'video_downloader')
+    DB_PASSWORD = os.getenv('DB_PASSWORD', 'secure_password_123')
     
     # MinIO Configuration
     MINIO_ENDPOINT = os.getenv('MINIO_ENDPOINT', 'minio-u39275.vm.elestio.app:34256')
