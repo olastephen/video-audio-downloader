@@ -127,7 +127,6 @@ GET /status/{task_id}
   "progress": 100.0,
   "filename": "Rick Astley - Never Gonna Give You Up.mp4",
   "download_url": "https://minio.example.com/presigned-url",
-  "storage_type": "minio",
   "file_size": 5242880
 }
 ```

@@ -146,7 +146,6 @@ class DownloadStatus(BaseModel):
     filename: Optional[str] = None
     error: Optional[str] = None
     download_url: Optional[str] = None
-    storage_type: Optional[str] = None
     file_size: Optional[int] = None
 
 def get_ydl_opts(quality: str = "best", format: str = "mp4", audio_only: bool = False) -> Dict[str, Any]:
@@ -303,7 +302,6 @@ async def download_video_task(task_id: str, url: str, quality: str = "best", for
                     download_status[task_id]['progress'] = 100.0
                     download_status[task_id]['filename'] = filename
                     download_status[task_id]['download_url'] = download_url
-                    download_status[task_id]['storage_type'] = 'minio'
                     download_status[task_id]['file_size'] = file_size
                 
                 # Update database
@@ -313,7 +311,6 @@ async def download_video_task(task_id: str, url: str, quality: str = "best", for
                             task_id, 
                             filename=filename,
                             download_url=download_url,
-                            storage_type='minio',
                             file_size=file_size
                         )
                     except Exception as db_error:
@@ -498,7 +495,6 @@ async def get_download_status(task_id: str):
             filename=status_info.get('filename'),
             error=status_info.get('error'),
             download_url=status_info.get('download_url'),
-            storage_type=status_info.get('storage_type'),
             file_size=status_info.get('file_size')
         )
     
@@ -514,7 +510,6 @@ async def get_download_status(task_id: str):
                     filename=db_task.filename,
                     error=db_task.error,
                     download_url=db_task.download_url,
-                    storage_type=db_task.storage_type,
                     file_size=db_task.file_size
                 )
         except Exception as e:
@@ -537,7 +532,6 @@ async def download_file(task_id: str):
             if db_task:
                 status_info = {
                     'status': db_task.status,
-                    'storage_type': db_task.storage_type,
                     'download_url': db_task.download_url,
                     'file_size': db_task.file_size
                 }
@@ -554,7 +548,7 @@ async def download_file(task_id: str):
         )
     
     # Only MinIO storage is supported (local storage disabled)
-    if status_info.get('storage_type') == 'minio' and status_info.get('download_url'):
+    if status_info.get('download_url'):
         # Redirect to the MinIO download URL with proper headers
         from fastapi.responses import RedirectResponse
         
