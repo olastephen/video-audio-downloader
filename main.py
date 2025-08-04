@@ -133,6 +133,7 @@ class VideoRequest(BaseModel):
     format: Optional[str] = "mp4"
     audio_only: Optional[bool] = False
     direct_download: Optional[bool] = False
+    stream_to_minio: Optional[bool] = False
 
 class DownloadResponse(BaseModel):
     task_id: str
@@ -205,7 +206,7 @@ def progress_hook(d):
             download_status[task_id]['status'] = 'completed'
             download_status[task_id]['filename'] = d.get('filename', '')
 
-async def download_video_task(task_id: str, url: str, quality: str = "best", format: str = "mp4", audio_only: bool = False, direct_download: bool = False):
+async def download_video_task(task_id: str, url: str, quality: str = "best", format: str = "mp4", audio_only: bool = False, direct_download: bool = False, stream_to_minio: bool = False):
     """Background task to download video"""
     logger.info(f"Using enhanced downloader for task {task_id}")
     
@@ -224,11 +225,17 @@ async def download_video_task(task_id: str, url: str, quality: str = "best", for
     try:
         # Use enhanced downloader
         if enhanced_downloader:
-            logger.info(f"Using enhanced downloader for task {task_id} (direct_download: {direct_download})")
+            logger.info(f"Using enhanced downloader for task {task_id} (direct_download: {direct_download}, stream_to_minio: {stream_to_minio})")
             try:
-                # Pass direct_download parameter to enhanced downloader
-                filepath = enhanced_downloader.download_video(url, quality, format, audio_only, direct_download)
-                downloaded_file = filepath
+                # Pass parameters to enhanced downloader
+                if stream_to_minio:
+                    # Stream directly to MinIO
+                    object_name = enhanced_downloader.download_video(url, quality, format, audio_only, direct_download, stream_to_minio)
+                    downloaded_file = f"minio://{object_name}"  # Special marker for MinIO objects
+                else:
+                    # Regular local download
+                    filepath = enhanced_downloader.download_video(url, quality, format, audio_only, direct_download, stream_to_minio)
+                    downloaded_file = filepath
             except Exception as e:
                 logger.error(f"Enhanced downloader error: {e}")
                 if task_id in download_status:
@@ -253,7 +260,13 @@ async def download_video_task(task_id: str, url: str, quality: str = "best", for
             return
         
         # Check if file exists and get file size
-        if not os.path.exists(downloaded_file):
+        if downloaded_file.startswith("minio://"):
+            # File is already in MinIO
+            object_name = downloaded_file.replace("minio://", "")
+            filename = object_name
+            file_size = 0  # Will be updated from MinIO metadata
+            logger.info(f"File already uploaded to MinIO: {object_name}")
+        elif not os.path.exists(downloaded_file):
             error_msg = f"Downloaded file not found: {downloaded_file}"
             logger.error(error_msg)
             if task_id in download_status:
@@ -265,25 +278,31 @@ async def download_video_task(task_id: str, url: str, quality: str = "best", for
                 except Exception as db_error:
                     logger.error(f"Failed to update database error status: {db_error}")
             return
-        
-        file_size = os.path.getsize(downloaded_file)
-        filename = os.path.basename(downloaded_file)
+        else:
+            file_size = os.path.getsize(downloaded_file)
+            filename = os.path.basename(downloaded_file)
         
         # Upload to MinIO (required - no local storage fallback)
         if MINIO_AVAILABLE and minio_storage:
             try:
-                logger.info(f"Uploading {downloaded_file} to MinIO for task {task_id}")
-                
-                # Upload to MinIO
-                object_name = f"{task_id}_{filename}"
-                minio_storage.upload_file(downloaded_file, object_name)
+                if downloaded_file.startswith("minio://"):
+                    # File is already in MinIO, just get the object name
+                    object_name = downloaded_file.replace("minio://", "")
+                    logger.info(f"File already in MinIO: {object_name}")
+                else:
+                    logger.info(f"Uploading {downloaded_file} to MinIO for task {task_id}")
+                    
+                    # Upload to MinIO
+                    object_name = f"{task_id}_{filename}"
+                    minio_storage.upload_file(downloaded_file, object_name)
                 
                 # Get presigned URL
                 download_url = minio_storage.generate_download_url(object_name)
                 
-                # Clean up local file
-                os.remove(downloaded_file)
-                logger.info(f"Cleaned up local file: {downloaded_file}")
+                # Clean up local file (only if it's a local file)
+                if not downloaded_file.startswith("minio://"):
+                    os.remove(downloaded_file)
+                    logger.info(f"Cleaned up local file: {downloaded_file}")
                 
                 # Update status
                 if task_id in download_status:
@@ -313,8 +332,8 @@ async def download_video_task(task_id: str, url: str, quality: str = "best", for
                 error_msg = f"Failed to upload to MinIO: {e}"
                 logger.error(error_msg)
                 
-                # Clean up local file even if MinIO upload fails
-                if os.path.exists(downloaded_file):
+                # Clean up local file even if MinIO upload fails (only if it's a local file)
+                if not downloaded_file.startswith("minio://") and os.path.exists(downloaded_file):
                     os.remove(downloaded_file)
                     logger.info(f"Cleaned up local file after MinIO failure: {downloaded_file}")
                 
@@ -331,8 +350,8 @@ async def download_video_task(task_id: str, url: str, quality: str = "best", for
             error_msg = "MinIO storage not available - local storage is disabled"
             logger.error(error_msg)
             
-            # Clean up local file since we don't allow local storage
-            if os.path.exists(downloaded_file):
+            # Clean up local file since we don't allow local storage (only if it's a local file)
+            if not downloaded_file.startswith("minio://") and os.path.exists(downloaded_file):
                 os.remove(downloaded_file)
                 logger.info(f"Cleaned up local file (MinIO not available): {downloaded_file}")
             
@@ -404,6 +423,7 @@ async def download_video(
     - format: Output format (mp4, webm, etc.)
     - audio_only: If True, download audio only
     - direct_download: If True, skip site-specific handlers and use direct download only
+    - stream_to_minio: If True, stream directly to MinIO without saving locally
     """
     try:
         # Rate limiting (if client_ip provided)
@@ -457,7 +477,8 @@ async def download_video(
             request.quality,
             request.format,
             request.audio_only,
-            request.direct_download
+            request.direct_download,
+            request.stream_to_minio
         )
         
         # Return immediately

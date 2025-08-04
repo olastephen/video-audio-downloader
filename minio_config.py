@@ -183,6 +183,108 @@ class MinIOStorage:
                 "error": str(e)
             }
     
+    def upload_stream(self, stream, object_name: str, content_type: str = "video/mp4", chunk_size: int = 8192) -> Dict[str, Any]:
+        """
+        Upload data directly from a stream to MinIO without saving to disk
+        
+        Args:
+            stream: File-like object or stream to upload
+            object_name: Name for the object in MinIO
+            content_type: MIME type of the file
+            chunk_size: Size of chunks to read from stream
+            
+        Returns:
+            Dict with upload result
+        """
+        if not self.client:
+            raise Exception("MinIO client not initialized")
+        
+        try:
+            # Use put_object with stream
+            result = self.client.put_object(
+                bucket_name=self.bucket_name,
+                object_name=object_name,
+                data=stream,
+                length=-1,  # Let MinIO determine length from stream
+                content_type=content_type
+            )
+            
+            logger.info(f"Stream uploaded successfully: {object_name}")
+            return {
+                "success": True,
+                "object_name": object_name,
+                "etag": result.etag,
+                "version_id": result.version_id
+            }
+            
+        except Exception as e:
+            logger.error(f"Error uploading stream: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    def upload_from_url_stream(self, url: str, object_name: str, content_type: str = "video/mp4") -> Dict[str, Any]:
+        """
+        Download from URL and upload directly to MinIO without saving locally
+        
+        Args:
+            url: URL to download from
+            object_name: Name for the object in MinIO
+            content_type: MIME type of the file
+            
+        Returns:
+            Dict with upload result
+        """
+        if not self.client:
+            raise Exception("MinIO client not initialized")
+        
+        try:
+            import requests
+            
+            # Stream download from URL
+            response = requests.get(url, stream=True)
+            response.raise_for_status()
+            
+            # Create a stream wrapper that provides content length
+            class StreamWrapper:
+                def __init__(self, response):
+                    self.response = response
+                    self.content_length = int(response.headers.get('content-length', 0))
+                
+                def read(self, chunk_size=8192):
+                    return self.response.raw.read(chunk_size)
+                
+                def __iter__(self):
+                    return self.response.iter_content(chunk_size=8192)
+            
+            stream_wrapper = StreamWrapper(response)
+            
+            # Upload stream to MinIO
+            result = self.client.put_object(
+                bucket_name=self.bucket_name,
+                object_name=object_name,
+                data=stream_wrapper,
+                length=stream_wrapper.content_length if stream_wrapper.content_length > 0 else -1,
+                content_type=content_type
+            )
+            
+            logger.info(f"URL stream uploaded successfully: {object_name}")
+            return {
+                "success": True,
+                "object_name": object_name,
+                "etag": result.etag,
+                "version_id": result.version_id,
+                "size": stream_wrapper.content_length
+            }
+            
+        except Exception as e:
+            logger.error(f"Error uploading from URL stream: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
     def delete_file(self, object_name: str) -> bool:
         """
         Delete a file from MinIO bucket

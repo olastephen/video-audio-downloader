@@ -661,10 +661,19 @@ class EnhancedVideoDownloader:
             logger.error(f"Generic video download failed: {e}")
             raise
 
-    def download_video(self, url: str, quality: str = "best", format: str = "mp4", audio_only: bool = False, direct_download: bool = False) -> str:
+    def download_video(self, url: str, quality: str = "best", format: str = "mp4", audio_only: bool = False, direct_download: bool = False, stream_to_minio: bool = False) -> str:
         """Download video using multiple social media downloaders with fallback"""
         platform = self.detect_platform(url)
-        logger.info(f"Detected platform: {platform} for URL: {url} (direct_download: {direct_download})")
+        logger.info(f"Detected platform: {platform} for URL: {url} (direct_download: {direct_download}, stream_to_minio: {stream_to_minio})")
+        
+        # If streaming to MinIO is requested, use direct streaming method
+        if stream_to_minio:
+            logger.info("Streaming download to MinIO requested")
+            try:
+                return self.download_and_stream_to_minio(url, quality, format, audio_only)
+            except Exception as e:
+                logger.warning(f"Direct streaming to MinIO failed: {e}")
+                # Fall back to regular download methods
         
         # If direct_download is explicitly requested, use direct download only
         if direct_download:
@@ -771,6 +780,133 @@ class EnhancedVideoDownloader:
         
         # If all social media downloaders fail
         raise Exception(f"All social media download methods failed for URL: {url}. Platform: {platform}")
+    
+    def download_and_stream_to_minio(self, url: str, quality: str = "best", format: str = "mp4", audio_only: bool = False) -> str:
+        """
+        Download video and stream directly to MinIO without saving locally
+        
+        Args:
+            url: Video URL to download
+            quality: Video quality
+            format: Output format
+            audio_only: Whether to download audio only
+            
+        Returns:
+            MinIO object name of the uploaded file
+        """
+        logger.info(f"Starting direct streaming download to MinIO: {url}")
+        
+        try:
+            # Import MinIO storage
+            from minio_config import MinIOStorage
+            minio_storage = MinIOStorage()
+            
+            if not minio_storage.client:
+                raise Exception("MinIO client not available")
+            
+            # Generate unique object name
+            import uuid
+            import time
+            object_name = f"video_{int(time.time())}_{uuid.uuid4().hex[:8]}.{format}"
+            
+            # Try different download methods for streaming
+            platform = self.detect_platform(url)
+            
+            # Method 1: Try yt-dlp with custom output template to stdout
+            try:
+                logger.info("Attempting yt-dlp streaming to MinIO...")
+                ydl_opts = self.get_yt_dlp_opts(quality, format, audio_only)
+                ydl_opts.update({
+                    'outtmpl': '-',  # Output to stdout
+                    'quiet': False,
+                    'progress_hooks': [self._progress_hook]
+                })
+                
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    # Get video info first
+                    info = ydl.extract_info(url, download=False)
+                    title = info.get('title', 'unknown_title')
+                    
+                    # Download to memory buffer
+                    import io
+                    buffer = io.BytesIO()
+                    
+                    # Create a custom progress hook that writes to buffer
+                    def stream_progress_hook(d):
+                        if d['status'] == 'downloading':
+                            # Write downloaded chunks to buffer
+                            if 'downloaded_bytes' in d and 'total_bytes' in d:
+                                progress = (d['downloaded_bytes'] / d['total_bytes']) * 100
+                                logger.info(f"Streaming progress: {progress:.1f}%")
+                    
+                    ydl_opts['progress_hooks'] = [stream_progress_hook]
+                    
+                    # Download to buffer
+                    ydl.download([url])
+                    
+                    # Get the downloaded data
+                    buffer.seek(0)
+                    data = buffer.getvalue()
+                    
+                    if data:
+                        # Upload to MinIO
+                        result = minio_storage.upload_from_memory(data, object_name, f"video/{format}")
+                        if result.get('success'):
+                            logger.info(f"Successfully streamed to MinIO: {object_name}")
+                            return object_name
+                        else:
+                            raise Exception(f"MinIO upload failed: {result.get('error')}")
+                    else:
+                        raise Exception("No data downloaded")
+                        
+            except Exception as e:
+                logger.warning(f"yt-dlp streaming failed: {e}")
+            
+            # Method 2: Try direct URL streaming if available
+            try:
+                logger.info("Attempting direct URL streaming to MinIO...")
+                result = minio_storage.upload_from_url_stream(url, object_name, f"video/{format}")
+                if result.get('success'):
+                    logger.info(f"Successfully streamed URL to MinIO: {object_name}")
+                    return object_name
+                else:
+                    raise Exception(f"URL streaming failed: {result.get('error')}")
+                    
+            except Exception as e:
+                logger.warning(f"Direct URL streaming failed: {e}")
+            
+            # Method 3: Fallback to temporary file upload
+            try:
+                logger.info("Attempting fallback download with temporary file...")
+                # Download to temporary file
+                temp_file = self.download_video(url, quality, format, audio_only, direct_download=False, stream_to_minio=False)
+                
+                if temp_file and os.path.exists(temp_file):
+                    try:
+                        # Upload to MinIO
+                        result = minio_storage.upload_file(temp_file, object_name)
+                        if result.get('success'):
+                            # Clean up temporary file
+                            os.remove(temp_file)
+                            logger.info(f"Successfully uploaded temporary file to MinIO: {object_name}")
+                            return object_name
+                        else:
+                            raise Exception(f"MinIO upload failed: {result.get('error')}")
+                    finally:
+                        # Ensure temporary file is cleaned up
+                        if os.path.exists(temp_file):
+                            os.remove(temp_file)
+                else:
+                    raise Exception("Temporary file download failed")
+                    
+            except Exception as e:
+                logger.warning(f"Fallback download failed: {e}")
+            
+            raise Exception("All streaming methods failed")
+            
+        except Exception as e:
+            logger.error(f"Direct streaming to MinIO failed: {e}")
+            raise
     
     def get_video_info(self, url: str) -> Dict[str, Any]:
         """Get video information without downloading"""
