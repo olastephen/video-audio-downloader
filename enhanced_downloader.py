@@ -176,8 +176,10 @@ class EnhancedVideoDownloader:
             'buffersize': 1024,
             'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             # Enhanced social media compatibility
-            'cookiesfrombrowser': ('chrome',),  # Use cookies from Chrome
+            # 'cookiesfrombrowser': ('chrome',),  # Disabled due to Chrome cookie database issues
             'cookiefile': None,  # Allow cookie file if available
+            # Alternative cookie sources (if available)
+            'cookiesfrombrowser': ('firefox', 'edge', 'safari'),  # Try other browsers if Chrome fails
             'extract_flat': False,
             'writeinfojson': False,
             'writesubtitles': False,
@@ -308,18 +310,54 @@ class EnhancedVideoDownloader:
                 logger.info("Starting yt-dlp download...")
                 ydl.download([url])
                 
-                # Get the downloaded file
+                # Get the downloaded file - try multiple approaches
                 info = ydl.extract_info(url, download=False)
                 title = info.get('title', 'unknown_title')
                 ext = info.get('ext', format or 'mp4')
-                filename = f"{title}.{ext}"
-                filepath = self.download_dir / filename
                 
-                if filepath.exists():
-                    logger.info(f"Successfully downloaded with yt-dlp: {filename}")
-                    return str(filepath)
-                else:
-                    raise Exception(f"Download completed but file not found: {filename}")
+                # Try different filename patterns
+                possible_filenames = [
+                    f"{title}.{ext}",
+                    f"{title}.mp4",
+                    f"{title}.webm",
+                    f"{title}.mkv"
+                ]
+                
+                # Also check for files with special characters removed
+                safe_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).rstrip()
+                possible_filenames.extend([
+                    f"{safe_title}.{ext}",
+                    f"{safe_title}.mp4",
+                    f"{safe_title}.webm",
+                    f"{safe_title}.mkv"
+                ])
+                
+                # Look for the downloaded file
+                for filename in possible_filenames:
+                    filepath = self.download_dir / filename
+                    if filepath.exists():
+                        logger.info(f"Successfully downloaded with yt-dlp: {filename}")
+                        return str(filepath)
+                
+                # If not found by name, look for recently created files
+                logger.warning(f"File not found by expected name, searching for recent files...")
+                import time
+                current_time = time.time()
+                
+                for file in self.download_dir.iterdir():
+                    if file.is_file() and file.suffix.lower() in ['.mp4', '.webm', '.mkv', '.avi', '.mov']:
+                        # Check if file was created in the last 5 minutes
+                        if current_time - file.stat().st_mtime < 300:  # 5 minutes
+                            logger.info(f"Found recently created file: {file.name}")
+                            return str(file)
+                
+                # If still not found, list all files in directory for debugging
+                logger.error(f"Download completed but file not found. Available files in {self.download_dir}:")
+                for file in self.download_dir.iterdir():
+                    if file.is_file():
+                        logger.error(f"  - {file.name} ({file.stat().st_size} bytes)")
+                
+                raise Exception(f"Download completed but file not found. Tried: {possible_filenames}")
                     
         except Exception as e:
             logger.error(f"yt-dlp download failed: {e}")
@@ -660,16 +698,54 @@ class EnhancedVideoDownloader:
             if platform_opts:
                 with yt_dlp.YoutubeDL(platform_opts) as ydl:
                     ydl.download([url])
-                    # Get the downloaded file
+                    # Get the downloaded file - use the same improved detection logic
                     info = ydl.extract_info(url, download=False)
                     title = info.get('title', 'unknown_title')
                     ext = info.get('ext', format or 'mp4')
-                    filename = f"{title}.{ext}"
-                    filepath = self.download_dir / filename
                     
-                    if filepath.exists():
-                        logger.info(f"Successfully downloaded with platform-specific yt-dlp: {filename}")
-                        return str(filepath)
+                    # Try different filename patterns
+                    possible_filenames = [
+                        f"{title}.{ext}",
+                        f"{title}.mp4",
+                        f"{title}.webm",
+                        f"{title}.mkv"
+                    ]
+                    
+                    # Also check for files with special characters removed
+                    safe_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).rstrip()
+                    possible_filenames.extend([
+                        f"{safe_title}.{ext}",
+                        f"{safe_title}.mp4",
+                        f"{safe_title}.webm",
+                        f"{safe_title}.mkv"
+                    ])
+                    
+                    # Look for the downloaded file
+                    for filename in possible_filenames:
+                        filepath = self.download_dir / filename
+                        if filepath.exists():
+                            logger.info(f"Successfully downloaded with platform-specific yt-dlp: {filename}")
+                            return str(filepath)
+                    
+                    # If not found by name, look for recently created files
+                    logger.warning(f"File not found by expected name, searching for recent files...")
+                    import time
+                    current_time = time.time()
+                    
+                    for file in self.download_dir.iterdir():
+                        if file.is_file() and file.suffix.lower() in ['.mp4', '.webm', '.mkv', '.avi', '.mov']:
+                            # Check if file was created in the last 5 minutes
+                            if current_time - file.stat().st_mtime < 300:  # 5 minutes
+                                logger.info(f"Found recently created file: {file.name}")
+                                return str(file)
+                    
+                    # If still not found, list all files in directory for debugging
+                    logger.error(f"Download completed but file not found. Available files in {self.download_dir}:")
+                    for file in self.download_dir.iterdir():
+                        if file.is_file():
+                            logger.error(f"  - {file.name} ({file.stat().st_size} bytes)")
+                    
+                    raise Exception(f"Download completed but file not found. Tried: {possible_filenames}")
         except Exception as e:
             logger.warning(f"Platform-specific yt-dlp download failed: {e}")
         
