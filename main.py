@@ -220,33 +220,38 @@ async def download_video_task(task_id: str, url: str, quality: str = "best", for
         except Exception as e:
             logger.error(f"Failed to update database status: {e}")
     
-    try:
-        # Use enhanced downloader
-        if enhanced_downloader:
-            logger.info(f"Using enhanced downloader for task {task_id} (direct_download: {direct_download})")
+    # Create progress callback function
+    def progress_callback(progress: float):
+        """Callback to update progress in real-time"""
+        if task_id in download_status:
+            download_status[task_id]['progress'] = progress
+            logger.info(f"Task {task_id} progress: {progress}%")
+        
+        # Update database if available
+        if DATABASE_AVAILABLE:
             try:
-                # Always stream directly to MinIO
-                object_name = enhanced_downloader.download_video(url, quality, format, audio_only, direct_download, stream_to_minio=True)
-                downloaded_file = f"minio://{object_name}"  # Special marker for MinIO objects
+                # Use asyncio.create_task to avoid blocking
+                asyncio.create_task(db_manager.update_task_status(task_id, 'downloading', progress=progress))
             except Exception as e:
-                logger.error(f"Enhanced downloader error: {e}")
-                if task_id in download_status:
-                    download_status[task_id]['status'] = 'failed'
-                    download_status[task_id]['error'] = str(e)
-                if DATABASE_AVAILABLE:
-                    try:
-                        await db_manager.update_task_status(task_id, 'failed', error=str(e))
-                    except Exception as db_error:
-                        logger.error(f"Failed to update database error status: {db_error}")
-                return
-        else:
-            logger.error("Enhanced downloader not available")
+                logger.debug(f"Failed to update database progress: {e}")
+    
+    try:
+        # Create enhanced downloader instance with progress callback for this task
+        task_downloader = EnhancedVideoDownloader(str(DOWNLOADS_DIR), progress_callback=progress_callback)
+        
+        logger.info(f"Using enhanced downloader for task {task_id} (direct_download: {direct_download})")
+        try:
+            # Always stream directly to MinIO
+            object_name = task_downloader.download_video(url, quality, format, audio_only, direct_download, stream_to_minio=True)
+            downloaded_file = f"minio://{object_name}"  # Special marker for MinIO objects
+        except Exception as e:
+            logger.error(f"Enhanced downloader error: {e}")
             if task_id in download_status:
                 download_status[task_id]['status'] = 'failed'
-                download_status[task_id]['error'] = 'Enhanced downloader not available'
+                download_status[task_id]['error'] = str(e)
             if DATABASE_AVAILABLE:
                 try:
-                    await db_manager.update_task_status(task_id, 'failed', error='Enhanced downloader not available')
+                    await db_manager.update_task_status(task_id, 'failed', error=str(e))
                 except Exception as db_error:
                     logger.error(f"Failed to update database error status: {db_error}")
             return

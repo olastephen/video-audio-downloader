@@ -53,9 +53,12 @@ logger = logging.getLogger(__name__)
 class EnhancedVideoDownloader:
     """Enhanced video downloader using multiple libraries and methods"""
     
-    def __init__(self, download_dir: str = "downloads"):
+    def __init__(self, download_dir: str = "downloads", progress_callback=None):
         self.download_dir = Path(download_dir)
         self.download_dir.mkdir(exist_ok=True)
+        
+        # Progress callback for real-time updates
+        self.progress_callback = progress_callback
         
         # Initialize scrapers
         self.session = requests.Session()
@@ -77,12 +80,26 @@ class EnhancedVideoDownloader:
                 if total > 0:
                     progress = (downloaded / total) * 100
                     logger.info(f"Download progress: {progress:.1f}% ({downloaded}/{total} bytes)")
+                    
+                    # Call progress callback if available
+                    if self.progress_callback:
+                        try:
+                            self.progress_callback(round(progress, 2))
+                        except Exception as e:
+                            logger.debug(f"Progress callback error: {e}")
                 else:
                     logger.info(f"Downloaded: {downloaded} bytes")
             except Exception as e:
                 logger.debug(f"Progress hook error: {e}")
         elif d['status'] == 'finished':
             logger.info(f"Download finished: {d.get('filename', 'unknown')}")
+            
+            # Call progress callback with 100% if available
+            if self.progress_callback:
+                try:
+                    self.progress_callback(100.0)
+                except Exception as e:
+                    logger.debug(f"Progress callback error: {e}")
 
     def detect_platform(self, url: str) -> str:
         """Detect the platform from URL"""
@@ -200,8 +217,8 @@ class EnhancedVideoDownloader:
             }
         }
         
-        if progress_hook:
-            opts['progress_hooks'] = [progress_hook]
+        # Always use our enhanced progress hook
+        opts['progress_hooks'] = [self._progress_hook]
         
         if audio_only:
             opts.update({
@@ -544,9 +561,24 @@ class EnhancedVideoDownloader:
                         if total_size > 0:
                             progress = (downloaded / total_size) * 100
                             logger.info(f"Download progress: {progress:.1f}%")
+                            
+                            # Call progress callback if available
+                            if self.progress_callback:
+                                try:
+                                    self.progress_callback(round(progress, 2))
+                                except Exception as e:
+                                    logger.debug(f"Progress callback error: {e}")
             
             if filepath.exists():
                 logger.info(f"Successfully downloaded direct video: {filename}")
+                
+                # Call progress callback with 100% if available
+                if self.progress_callback:
+                    try:
+                        self.progress_callback(100.0)
+                    except Exception as e:
+                        logger.debug(f"Progress callback error: {e}")
+                
                 return str(filepath)
             else:
                 raise Exception(f"Download completed but file not found: {filename}")
