@@ -72,6 +72,22 @@ async def lifespan(app: FastAPI):
             download_status[task_id]['error'] = 'Server shutdown'
     logger.info("All tasks marked as cancelled")
 
+# Start periodic cleanup task
+async def start_cleanup_task():
+    """Start periodic cleanup of old tasks"""
+    while True:
+        try:
+            await asyncio.sleep(Config.TASK_CLEANUP_INTERVAL)
+            await cleanup_old_tasks()
+        except Exception as e:
+            logger.error(f"Error in cleanup task: {e}")
+
+# Start cleanup task when app starts
+@app.on_event("startup")
+async def startup_event():
+    """Startup event to initialize cleanup task"""
+    asyncio.create_task(start_cleanup_task())
+
 app = FastAPI(
     title="Video Downloader API",
     description="A powerful API to download videos from various platforms",
@@ -92,18 +108,34 @@ app.add_middleware(
 DOWNLOADS_DIR = Path("downloads")
 DOWNLOADS_DIR.mkdir(exist_ok=True)
 
-# Store download status
+# Store download status with concurrency management
 download_status = {}
+active_downloads = 0  # Track active downloads
+download_semaphore = asyncio.Semaphore(Config.MAX_CONCURRENT_DOWNLOADS)
 
-# Simple rate limiting (requests per minute per IP)
+# Rate limiting (requests per minute per IP and global)
 rate_limit_store = {}
-RATE_LIMIT = 10  # requests per minute
+global_rate_limit_store = []
+RATE_LIMIT = Config.RATE_LIMIT  # requests per minute per IP
+GLOBAL_RATE_LIMIT = Config.GLOBAL_RATE_LIMIT  # global requests per minute
 
 def check_rate_limit(client_ip: str) -> bool:
-    """Simple rate limiting by IP address"""
+    """Enhanced rate limiting by IP address and global limits"""
     import time
     current_time = time.time()
     
+    # Global rate limiting
+    global global_rate_limit_store
+    global_rate_limit_store = [
+        req_time for req_time in global_rate_limit_store 
+        if current_time - req_time < 60
+    ]
+    
+    if len(global_rate_limit_store) >= GLOBAL_RATE_LIMIT:
+        logger.warning(f"Global rate limit exceeded: {len(global_rate_limit_store)} requests in last minute")
+        return False
+    
+    # Per-IP rate limiting
     if client_ip not in rate_limit_store:
         rate_limit_store[client_ip] = []
     
@@ -115,11 +147,51 @@ def check_rate_limit(client_ip: str) -> bool:
     
     # Check if limit exceeded
     if len(rate_limit_store[client_ip]) >= RATE_LIMIT:
+        logger.warning(f"Rate limit exceeded for IP {client_ip}: {len(rate_limit_store[client_ip])} requests in last minute")
         return False
     
-    # Add current request
+    # Add current request to both stores
     rate_limit_store[client_ip].append(current_time)
+    global_rate_limit_store.append(current_time)
     return True
+
+async def cleanup_old_tasks():
+    """Clean up old completed tasks from memory"""
+    import time
+    current_time = time.time()
+    cutoff_time = current_time - (Config.TASK_RETENTION_HOURS * 3600)
+    
+    tasks_to_remove = []
+    for task_id, task_data in download_status.items():
+        # Remove tasks older than retention period
+        if task_data.get('status') in ['completed', 'failed', 'cancelled']:
+            if 'timestamp' in task_data and task_data['timestamp'] < cutoff_time:
+                tasks_to_remove.append(task_id)
+    
+    for task_id in tasks_to_remove:
+        del download_status[task_id]
+    
+    if tasks_to_remove:
+        logger.info(f"Cleaned up {len(tasks_to_remove)} old tasks from memory")
+    
+    # Also clean up rate limit stores
+    global rate_limit_store, global_rate_limit_store
+    current_time = time.time()
+    
+    # Clean up IP rate limit store
+    for ip in list(rate_limit_store.keys()):
+        rate_limit_store[ip] = [
+            req_time for req_time in rate_limit_store[ip] 
+            if current_time - req_time < 60
+        ]
+        if not rate_limit_store[ip]:
+            del rate_limit_store[ip]
+    
+    # Clean up global rate limit store
+    global_rate_limit_store = [
+        req_time for req_time in global_rate_limit_store 
+        if current_time - req_time < 60
+    ]
 
 # Initialize enhanced downloader if available
 if ENHANCED_DOWNLOADER_AVAILABLE:
@@ -205,20 +277,34 @@ def progress_hook(d):
             download_status[task_id]['filename'] = d.get('filename', '')
 
 async def download_video_task(task_id: str, url: str, quality: str = "best", format: str = "mp4", audio_only: bool = False, direct_download: bool = False):
-    """Background task to download video"""
-    logger.info(f"Using enhanced downloader for task {task_id}")
+    """Background task to download video with concurrency management"""
+    global active_downloads
     
-    # Update status to downloading immediately
+    # Add timestamp for cleanup
     if task_id in download_status:
-        download_status[task_id]['status'] = 'downloading'
-        download_status[task_id]['progress'] = 0.0
+        download_status[task_id]['timestamp'] = time.time()
     
-    # Update database if available
-    if DATABASE_AVAILABLE:
+    # Use semaphore to limit concurrent downloads
+    async with download_semaphore:
+        active_downloads += 1
+        logger.info(f"Starting download task {task_id} (active downloads: {active_downloads})")
+        
         try:
-            await db_manager.update_task_status(task_id, 'downloading', progress=0.0)
+            # Update status to downloading immediately
+            if task_id in download_status:
+                download_status[task_id]['status'] = 'downloading'
+                download_status[task_id]['progress'] = 0.0
+            
+            # Update database if available
+            if DATABASE_AVAILABLE:
+                try:
+                    await db_manager.update_task_status(task_id, 'downloading', progress=0.0)
+                except Exception as e:
+                    logger.error(f"Failed to update database status: {e}")
         except Exception as e:
-            logger.error(f"Failed to update database status: {e}")
+            logger.error(f"Error in download task {task_id}: {e}")
+            active_downloads -= 1
+            raise
     
     # Create progress callback function
     def progress_callback(progress: float):
@@ -373,6 +459,11 @@ async def download_video_task(task_id: str, url: str, quality: str = "best", for
                 await db_manager.update_task_status(task_id, 'failed', error=error_msg)
             except Exception as db_error:
                 logger.error(f"Failed to update database error status: {db_error}")
+    
+    finally:
+        # Always decrement active downloads counter
+        active_downloads -= 1
+        logger.info(f"Completed download task {task_id} (active downloads: {active_downloads})")
 
 @app.get("/")
 async def root():
@@ -400,7 +491,54 @@ async def root():
             "download_file": "/download_file/{task_id}",
             "video_info": "/video_info",
             "minio_files": "/minio/files",
-            "delete_minio_file": "/minio/files/{object_name}"
+            "delete_minio_file": "/minio/files/{object_name}",
+            "system_status": "/system/status"
+        }
+    }
+
+@app.get("/system/status")
+async def system_status():
+    """Get system status and concurrency information"""
+    import psutil
+    
+    # Get system metrics
+    cpu_percent = psutil.cpu_percent(interval=1)
+    memory = psutil.virtual_memory()
+    disk = psutil.disk_usage('/')
+    
+    # Count tasks by status
+    task_counts = {}
+    for task_data in download_status.values():
+        status = task_data.get('status', 'unknown')
+        task_counts[status] = task_counts.get(status, 0) + 1
+    
+    return {
+        "system": {
+            "cpu_percent": cpu_percent,
+            "memory_percent": memory.percent,
+            "memory_available_gb": round(memory.available / (1024**3), 2),
+            "disk_percent": disk.percent,
+            "disk_free_gb": round(disk.free / (1024**3), 2)
+        },
+        "concurrency": {
+            "active_downloads": active_downloads,
+            "max_concurrent_downloads": Config.MAX_CONCURRENT_DOWNLOADS,
+            "download_semaphore_available": download_semaphore._value,
+            "total_tasks_in_memory": len(download_status),
+            "max_memory_tasks": Config.MAX_MEMORY_TASKS
+        },
+        "tasks": task_counts,
+        "rate_limiting": {
+            "rate_limit_per_ip": RATE_LIMIT,
+            "global_rate_limit": GLOBAL_RATE_LIMIT,
+            "active_ips": len(rate_limit_store),
+            "global_requests_last_minute": len(global_rate_limit_store)
+        },
+        "configuration": {
+            "download_timeout": Config.DOWNLOAD_TIMEOUT,
+            "max_download_size": Config.MAX_DOWNLOAD_SIZE,
+            "task_retention_hours": Config.TASK_RETENTION_HOURS,
+            "cleanup_interval": Config.TASK_CLEANUP_INTERVAL
         }
     }
 
