@@ -133,7 +133,6 @@ class VideoRequest(BaseModel):
     format: Optional[str] = "mp4"
     audio_only: Optional[bool] = False
     direct_download: Optional[bool] = False
-    stream_to_minio: Optional[bool] = False
 
 class DownloadResponse(BaseModel):
     task_id: str
@@ -206,7 +205,7 @@ def progress_hook(d):
             download_status[task_id]['status'] = 'completed'
             download_status[task_id]['filename'] = d.get('filename', '')
 
-async def download_video_task(task_id: str, url: str, quality: str = "best", format: str = "mp4", audio_only: bool = False, direct_download: bool = False, stream_to_minio: bool = False):
+async def download_video_task(task_id: str, url: str, quality: str = "best", format: str = "mp4", audio_only: bool = False, direct_download: bool = False):
     """Background task to download video"""
     logger.info(f"Using enhanced downloader for task {task_id}")
     
@@ -225,17 +224,11 @@ async def download_video_task(task_id: str, url: str, quality: str = "best", for
     try:
         # Use enhanced downloader
         if enhanced_downloader:
-            logger.info(f"Using enhanced downloader for task {task_id} (direct_download: {direct_download}, stream_to_minio: {stream_to_minio})")
+            logger.info(f"Using enhanced downloader for task {task_id} (direct_download: {direct_download})")
             try:
-                # Pass parameters to enhanced downloader
-                if stream_to_minio:
-                    # Stream directly to MinIO
-                    object_name = enhanced_downloader.download_video(url, quality, format, audio_only, direct_download, stream_to_minio)
-                    downloaded_file = f"minio://{object_name}"  # Special marker for MinIO objects
-                else:
-                    # Regular local download
-                    filepath = enhanced_downloader.download_video(url, quality, format, audio_only, direct_download, stream_to_minio)
-                    downloaded_file = filepath
+                # Always stream directly to MinIO
+                object_name = enhanced_downloader.download_video(url, quality, format, audio_only, direct_download, stream_to_minio=True)
+                downloaded_file = f"minio://{object_name}"  # Special marker for MinIO objects
             except Exception as e:
                 logger.error(f"Enhanced downloader error: {e}")
                 if task_id in download_status:
@@ -423,7 +416,8 @@ async def download_video(
     - format: Output format (mp4, webm, etc.)
     - audio_only: If True, download audio only
     - direct_download: If True, skip site-specific handlers and use direct download only
-    - stream_to_minio: If True, stream directly to MinIO without saving locally
+    
+    Note: All downloads are streamed directly to MinIO without saving locally
     """
     try:
         # Rate limiting (if client_ip provided)
@@ -477,8 +471,7 @@ async def download_video(
             request.quality,
             request.format,
             request.audio_only,
-            request.direct_download,
-            request.stream_to_minio
+            request.direct_download
         )
         
         # Return immediately

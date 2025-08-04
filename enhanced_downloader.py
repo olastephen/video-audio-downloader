@@ -661,19 +661,18 @@ class EnhancedVideoDownloader:
             logger.error(f"Generic video download failed: {e}")
             raise
 
-    def download_video(self, url: str, quality: str = "best", format: str = "mp4", audio_only: bool = False, direct_download: bool = False, stream_to_minio: bool = False) -> str:
+    def download_video(self, url: str, quality: str = "best", format: str = "mp4", audio_only: bool = False, direct_download: bool = False, stream_to_minio: bool = True) -> str:
         """Download video using multiple social media downloaders with fallback"""
         platform = self.detect_platform(url)
-        logger.info(f"Detected platform: {platform} for URL: {url} (direct_download: {direct_download}, stream_to_minio: {stream_to_minio})")
+        logger.info(f"Detected platform: {platform} for URL: {url} (direct_download: {direct_download})")
         
-        # If streaming to MinIO is requested, use direct streaming method
-        if stream_to_minio:
-            logger.info("Streaming download to MinIO requested")
-            try:
-                return self.download_and_stream_to_minio(url, quality, format, audio_only)
-            except Exception as e:
-                logger.warning(f"Direct streaming to MinIO failed: {e}")
-                # Fall back to regular download methods
+        # Always use direct streaming to MinIO
+        logger.info("Streaming download to MinIO")
+        try:
+            return self.download_and_stream_to_minio(url, quality, format, audio_only)
+        except Exception as e:
+            logger.warning(f"Direct streaming to MinIO failed: {e}")
+            # Fall back to regular download methods (but still stream to MinIO)
         
         # If direct_download is explicitly requested, use direct download only
         if direct_download:
@@ -878,8 +877,8 @@ class EnhancedVideoDownloader:
             # Method 3: Fallback to temporary file upload
             try:
                 logger.info("Attempting fallback download with temporary file...")
-                # Download to temporary file
-                temp_file = self.download_video(url, quality, format, audio_only, direct_download=False, stream_to_minio=False)
+                # Download to temporary file (force local download for fallback)
+                temp_file = self._download_video_local(url, quality, format, audio_only, direct_download=False)
                 
                 if temp_file and os.path.exists(temp_file):
                     try:
@@ -907,6 +906,62 @@ class EnhancedVideoDownloader:
         except Exception as e:
             logger.error(f"Direct streaming to MinIO failed: {e}")
             raise
+    
+    def _download_video_local(self, url: str, quality: str = "best", format: str = "mp4", audio_only: bool = False, direct_download: bool = False) -> str:
+        """
+        Internal method for local download (used as fallback for streaming)
+        This is the original download logic without MinIO streaming
+        """
+        platform = self.detect_platform(url)
+        logger.info(f"Local download fallback for platform: {platform}")
+        
+        # If direct_download is explicitly requested, use direct download only
+        if direct_download:
+            logger.info("Direct download requested")
+            try:
+                return self.download_direct_video(url, quality, format, audio_only)
+            except Exception as e:
+                logger.error(f"Direct download failed: {e}")
+                raise Exception(f"Direct download failed for URL: {url}")
+        
+        # Try yt-dlp first (primary social media downloader)
+        try:
+            logger.info("Attempting yt-dlp download...")
+            return self.download_with_yt_dlp(url, quality, format, audio_only)
+        except Exception as e:
+            logger.warning(f"yt-dlp download failed: {e}")
+        
+        # Try pytube for YouTube-specific downloads
+        if "youtube.com" in url or "youtu.be" in url:
+            try:
+                logger.info("Attempting pytube download...")
+                return self.download_with_pytube(url, quality, format, audio_only)
+            except Exception as e:
+                logger.warning(f"pytube download failed: {e}")
+        
+        # Try platform-specific yt-dlp with custom options
+        try:
+            logger.info("Attempting platform-specific yt-dlp download...")
+            return self.download_with_platform_specific_yt_dlp(url, quality, format, audio_only)
+        except Exception as e:
+            logger.warning(f"Platform-specific yt-dlp download failed: {e}")
+        
+        # Try youtube-dl as secondary fallback
+        try:
+            logger.info("Attempting youtube-dl download...")
+            return self.download_with_youtube_dl(url, quality, format, audio_only)
+        except Exception as e:
+            logger.warning(f"youtube-dl download failed: {e}")
+        
+        # Try generic video download as last resort
+        try:
+            logger.info("Attempting generic video download...")
+            return self.download_generic_video(url, quality, format, audio_only)
+        except Exception as e:
+            logger.warning(f"Generic video download failed: {e}")
+        
+        # If all social media downloaders fail
+        raise Exception(f"All social media download methods failed for URL: {url}. Platform: {platform}")
     
     def get_video_info(self, url: str) -> Dict[str, Any]:
         """Get video information without downloading"""
