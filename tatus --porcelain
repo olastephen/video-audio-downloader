@@ -1,0 +1,3 @@
+Dockerfile
+docker-compose.prod.yml
+requirements.txt
