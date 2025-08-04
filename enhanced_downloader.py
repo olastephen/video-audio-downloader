@@ -351,9 +351,9 @@ class EnhancedVideoDownloader:
                 # Look for the downloaded file
                 for filename in possible_filenames:
                     filepath = self.download_dir / filename
-                    if filepath.exists():
-                        logger.info(f"Successfully downloaded with yt-dlp: {filename}")
-                        return str(filepath)
+                if filepath.exists():
+                    logger.info(f"Successfully downloaded with yt-dlp: {filename}")
+                    return str(filepath)
                 
                 # If not found by name, look for recently created files
                 logger.warning(f"File not found by expected name, searching for recent files...")

@@ -1,11 +1,10 @@
-# Database Configuration (Pure PostgreSQL - Elestio)
+# Database Configuration - PostgreSQL (Elestio)
 DB_HOST=postgres-u39275.vm.elestio.app
 DB_PORT=25432
 POSTGRES1_DB=video_downloader
 POSTGRES1_USER=postgres
 POSTGRES1_PASSWORD=Dc8y1zsi-EAih-ojZwCiVI
 DB_SSL_MODE=require
-ALLOW_SQLITE_FALLBACK=false
 
 # MinIO Configuration
 MINIO_ENDPOINT=minio-u39275.vm.elestio.app:34256
@@ -13,7 +12,7 @@ MINIO_ACCESS_KEY=root
 MINIO_SECRET_KEY=o86Lv2Ta-x1rk-SHd5RK0B
 MINIO_SECURE=true
 MINIO_BUCKET=video-downloads
-MINIO_URL_EXPIRY=43200  # 12 hours in seconds (43200 = 12 * 60 * 60)
+MINIO_URL_EXPIRY=43200
 
 # API Configuration
 API_HOST=0.0.0.0
@@ -23,16 +22,5 @@ DEBUG=false
 # Download Configuration
 MAX_DOWNLOAD_SIZE=1073741824
 DOWNLOAD_TIMEOUT=600
-LOCAL_STORAGE_FALLBACK=false
 
-# Concurrency and Performance Configuration
-MAX_CONCURRENT_DOWNLOADS=50
-MAX_MEMORY_TASKS=1000
-TASK_CLEANUP_INTERVAL=3600
-TASK_RETENTION_HOURS=24
-
-# Rate Limiting - Removed (RapidAPI handles rate limiting)
-
-# Worker Configuration
-WORKER_POOL_SIZE=10
-CHUNK_SIZE=8192 
+# Rate Limiting - Removed (RapidAPI handles rate limiting) 

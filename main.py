@@ -61,21 +61,10 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"Failed to initialize database: {e}")
     
-    # Start cleanup task
-    cleanup_task = asyncio.create_task(start_cleanup_task())
-    logger.info("Cleanup task started")
-    
     yield
     
     # Shutdown
     logger.info("Shutting down gracefully...")
-    
-    # Cancel cleanup task
-    cleanup_task.cancel()
-    try:
-        await cleanup_task
-    except asyncio.CancelledError:
-        logger.info("Cleanup task cancelled")
     
     # Mark all ongoing tasks as cancelled
     for task_id in list(download_status.keys()):
@@ -84,15 +73,7 @@ async def lifespan(app: FastAPI):
             download_status[task_id]['error'] = 'Server shutdown'
     logger.info("All tasks marked as cancelled")
 
-# Start periodic cleanup task
-async def start_cleanup_task():
-    """Start periodic cleanup of old tasks"""
-    while True:
-        try:
-            await asyncio.sleep(Config.TASK_CLEANUP_INTERVAL)
-            await cleanup_old_tasks()
-        except Exception as e:
-            logger.error(f"Error in cleanup task: {e}")
+# Cleanup task removed - no longer needed
 
 app = FastAPI(
     title="Video Downloader API",
@@ -116,33 +97,12 @@ app.add_middleware(
 DOWNLOADS_DIR = Path("downloads")
 DOWNLOADS_DIR.mkdir(exist_ok=True)
 
-# Store download status with concurrency management
+# Store download status
 download_status = {}
-active_downloads = 0  # Track active downloads
-download_semaphore = asyncio.Semaphore(Config.MAX_CONCURRENT_DOWNLOADS)
 
 # Rate limiting removed - RapidAPI handles rate limiting
 
-async def cleanup_old_tasks():
-    """Clean up old completed tasks from memory"""
-    import time
-    current_time = time.time()
-    cutoff_time = current_time - (Config.TASK_RETENTION_HOURS * 3600)
-    
-    tasks_to_remove = []
-    for task_id, task_data in download_status.items():
-        # Remove tasks older than retention period
-        if task_data.get('status') in ['completed', 'failed', 'cancelled']:
-            if 'timestamp' in task_data and task_data['timestamp'] < cutoff_time:
-                tasks_to_remove.append(task_id)
-    
-    for task_id in tasks_to_remove:
-        del download_status[task_id]
-    
-    if tasks_to_remove:
-        logger.info(f"Cleaned up {len(tasks_to_remove)} old tasks from memory")
-    
-    # Rate limiting cleanup removed - RapidAPI handles rate limiting
+# Cleanup function removed - no longer needed
 
 # Initialize enhanced downloader if available
 if ENHANCED_DOWNLOADER_AVAILABLE:
@@ -228,70 +188,48 @@ def progress_hook(d):
             download_status[task_id]['filename'] = d.get('filename', '')
 
 async def download_video_task(task_id: str, url: str, quality: str = "best", format: str = "mp4", audio_only: bool = False, direct_download: bool = False):
-    """Background task to download video with concurrency management"""
-    global active_downloads
+    """Background task to download video"""
     
     # Add timestamp for cleanup
     if task_id in download_status:
         download_status[task_id]['timestamp'] = time.time()
     
-    # Use semaphore to limit concurrent downloads
-    async with download_semaphore:
-        active_downloads += 1
-        logger.info(f"Starting download task {task_id} (active downloads: {active_downloads})")
-        
-        try:
-            # Update status to downloading immediately
-            if task_id in download_status:
-                download_status[task_id]['status'] = 'downloading'
-                download_status[task_id]['progress'] = 0.0
-            
-            # Update database if available
-            if DATABASE_AVAILABLE:
-                try:
-                    await db_manager.update_task_status(task_id, 'downloading', progress=0.0)
-                except Exception as e:
-                    logger.error(f"Failed to update database status: {e}")
-        except Exception as e:
-            logger.error(f"Error in download task {task_id}: {e}")
-            active_downloads -= 1
-            raise
-    
-    # Create progress callback function
-    def progress_callback(progress: float):
-        """Callback to update progress in real-time"""
+    try:
+        # Update status to downloading immediately
         if task_id in download_status:
-            download_status[task_id]['progress'] = progress
-            logger.info(f"Task {task_id} progress: {progress}%")
+            download_status[task_id]['status'] = 'downloading'
+            download_status[task_id]['progress'] = 0.0
         
         # Update database if available
         if DATABASE_AVAILABLE:
             try:
-                # Use asyncio.create_task to avoid blocking
-                asyncio.create_task(db_manager.update_task_status(task_id, 'downloading', progress=progress))
+                await db_manager.update_task_status(task_id, 'downloading', progress=0.0)
             except Exception as e:
-                logger.debug(f"Failed to update database progress: {e}")
-    
-    try:
+                logger.error(f"Failed to update database status: {e}")
+        
+        # Create progress callback function
+        def progress_callback(progress: float):
+            """Callback to update progress in real-time"""
+            if task_id in download_status:
+                download_status[task_id]['progress'] = progress
+                logger.info(f"Task {task_id} progress: {progress}%")
+            
+            # Update database if available
+            if DATABASE_AVAILABLE:
+                try:
+                    # Use asyncio.create_task to avoid blocking
+                    asyncio.create_task(db_manager.update_task_status(task_id, 'downloading', progress=progress))
+                except Exception as e:
+                    logger.debug(f"Failed to update database progress: {e}")
+        
         # Create enhanced downloader instance with progress callback for this task
         task_downloader = EnhancedVideoDownloader(str(DOWNLOADS_DIR), progress_callback=progress_callback)
         
         logger.info(f"Using enhanced downloader for task {task_id} (direct_download: {direct_download})")
-        try:
-            # Always stream directly to MinIO
-            object_name = task_downloader.download_video(url, quality, format, audio_only, direct_download, stream_to_minio=True)
-            downloaded_file = f"minio://{object_name}"  # Special marker for MinIO objects
-        except Exception as e:
-            logger.error(f"Enhanced downloader error: {e}")
-            if task_id in download_status:
-                download_status[task_id]['status'] = 'failed'
-                download_status[task_id]['error'] = str(e)
-            if DATABASE_AVAILABLE:
-                try:
-                    await db_manager.update_task_status(task_id, 'failed', error=str(e))
-                except Exception as db_error:
-                    logger.error(f"Failed to update database error status: {db_error}")
-            return
+        
+        # Always stream directly to MinIO
+        object_name = task_downloader.download_video(url, quality, format, audio_only, direct_download, stream_to_minio=True)
+        downloaded_file = f"minio://{object_name}"  # Special marker for MinIO objects
         
         # Check if file exists and get file size
         if downloaded_file.startswith("minio://"):
@@ -412,9 +350,8 @@ async def download_video_task(task_id: str, url: str, quality: str = "best", for
                 logger.error(f"Failed to update database error status: {db_error}")
     
     finally:
-        # Always decrement active downloads counter
-        active_downloads -= 1
-        logger.info(f"Completed download task {task_id} (active downloads: {active_downloads})")
+        # Task completed
+        logger.info(f"Completed download task {task_id}")
 
 @app.get("/")
 async def root():
@@ -460,7 +397,7 @@ async def health_check():
 
 @app.get("/system/status")
 async def system_status():
-    """Get system status and concurrency information"""
+    """Get system status information"""
     import psutil
     
     # Get system metrics
@@ -482,23 +419,17 @@ async def system_status():
             "disk_percent": disk.percent,
             "disk_free_gb": round(disk.free / (1024**3), 2)
         },
-        "concurrency": {
-            "active_downloads": active_downloads,
-            "max_concurrent_downloads": Config.MAX_CONCURRENT_DOWNLOADS,
-            "download_semaphore_available": download_semaphore._value,
+        "tasks": {
             "total_tasks_in_memory": len(download_status),
-            "max_memory_tasks": Config.MAX_MEMORY_TASKS
+            "task_counts": task_counts
         },
-        "tasks": task_counts,
         "rate_limiting": {
             "note": "Rate limiting handled by RapidAPI",
             "rapidapi_managed": True
         },
         "configuration": {
             "download_timeout": Config.DOWNLOAD_TIMEOUT,
-            "max_download_size": Config.MAX_DOWNLOAD_SIZE,
-            "task_retention_hours": Config.TASK_RETENTION_HOURS,
-            "cleanup_interval": Config.TASK_CLEANUP_INTERVAL
+            "max_download_size": Config.MAX_DOWNLOAD_SIZE
         }
     }
 
@@ -618,7 +549,7 @@ async def get_download_status(task_id: str):
             raise HTTPException(
                 status_code=503, 
                 detail="Database query timeout. Please try again."
-            )
+                )
         except Exception as e:
             logger.error(f"Database error when getting task status for {task_id}: {e}")
             raise HTTPException(
