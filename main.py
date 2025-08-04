@@ -245,9 +245,19 @@ def categorize_media_format(format_info: Dict[str, Any], platform: str) -> Dict[
         if media_info["type"] == "audio":
             media_info["quality"] = "audio"
         else:
-            # Determine TikTok video quality
+            # Determine TikTok video quality based on bitrate and URL patterns
+            bitrate = format_info.get('bitrate', 0)
             height = format_info.get('height', 0)
-            if height >= 1080:
+            url = format_info.get('url', '')
+            
+            # Check for specific URL patterns that indicate quality
+            if 'euttp' in url and bitrate >= 900:
+                media_info["quality"] = "hd_no_watermark"
+            elif 'pve-0037-aiso' in url and bitrate >= 1800:
+                media_info["quality"] = "no_watermark"
+            elif 'pve-0037-aiso' in url and bitrate < 1800:
+                media_info["quality"] = "watermark"
+            elif height >= 1080:
                 media_info["quality"] = "hd_no_watermark"
             elif height >= 720:
                 media_info["quality"] = "no_watermark"
@@ -282,13 +292,181 @@ def categorize_media_format(format_info: Dict[str, Any], platform: str) -> Dict[
     
     return media_info
 
-async def extract_tiktok_info(url: str) -> Dict[str, Any]:
+async def extract_tiktok_cdn_direct(url: str) -> Optional[Dict[str, Any]]:
+    """Direct TikTok CDN extraction using alternative methods"""
+    try:
+        video_id = extract_video_id(url, 'tiktok')
+        unique_id = extract_unique_id(url, 'tiktok')
+        
+        # Method 1: Try TikTok API directly
+        api_url = f"https://api16-normal-c-useast1a.tiktokv.com/aweme/v1/feed/?aweme_id={video_id}"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
+            'Accept': 'application/json',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive'
+        }
+        
+        response = requests.get(api_url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            try:
+                data = response.json()
+                if data.get('aweme_list') and len(data['aweme_list']) > 0:
+                    aweme = data['aweme_list'][0]
+                    return {
+                        'uploader': aweme.get('author', {}).get('unique_id', unique_id),
+                        'title': aweme.get('desc', f'TikTok Video {video_id}'),
+                        'description': aweme.get('desc', ''),
+                        'duration': aweme.get('video', {}).get('duration', 0) * 1000,  # Convert to milliseconds
+                        'view_count': aweme.get('statistics', {}).get('play_count', 0),
+                        'upload_date': aweme.get('create_time', 0),
+                        'thumbnail': aweme.get('video', {}).get('cover', {}).get('url_list', [''])[0],
+                        'formats': []
+                    }
+            except:
+                pass
+        
+        # Method 2: Try with different API endpoint
+        api_url2 = f"https://api16-normal-c-useast1a.tiktokv.com/aweme/v1/play/?video_id={video_id}"
+        response2 = requests.get(api_url2, headers=headers, timeout=10)
+        if response2.status_code == 200:
+            # This might give us direct video URLs
+            pass
+        
+        # Method 3: Try TikTok-specific libraries
+        try:
+            # Try tiktok-api library
+            from tiktok_api import TikTokApi
+            api = TikTokApi()
+            video_data = api.get_video_by_url(url)
+            if video_data:
+                return {
+                    'uploader': video_data.get('author', {}).get('unique_id', unique_id),
+                    'title': video_data.get('desc', f'TikTok Video {video_id}'),
+                    'description': video_data.get('desc', ''),
+                    'duration': video_data.get('video', {}).get('duration', 0),
+                    'view_count': video_data.get('statistics', {}).get('play_count', 0),
+                    'upload_date': video_data.get('create_time', 0),
+                    'thumbnail': video_data.get('video', {}).get('cover', {}).get('url_list', [''])[0],
+                    'formats': []
+                }
+        except ImportError:
+            logger.warning("tiktok-api library not available")
+        except Exception as e:
+            logger.warning(f"tiktok-api extraction failed: {e}")
+        
+        # Method 4: Try tiktok-downloader library
+        try:
+            from tiktok_downloader import TikTokDownloader
+            downloader = TikTokDownloader()
+            video_info = downloader.get_video_info(url)
+            if video_info:
+                return {
+                    'uploader': video_info.get('author', unique_id),
+                    'title': video_info.get('title', f'TikTok Video {video_id}'),
+                    'description': video_info.get('description', ''),
+                    'duration': video_info.get('duration', 0),
+                    'view_count': video_info.get('view_count', 0),
+                    'upload_date': video_info.get('upload_date', 0),
+                    'thumbnail': video_info.get('thumbnail', ''),
+                    'formats': video_info.get('formats', [])
+                }
+        except ImportError:
+            logger.warning("tiktok-downloader library not available")
+        except Exception as e:
+            logger.warning(f"tiktok-downloader extraction failed: {e}")
+        
+        return None
+        
+    except Exception as e:
+        logger.error(f"Direct TikTok CDN extraction failed: {e}")
+        return None
+
+async def extract_tiktok_info_direct(url: str) -> Optional[Dict[str, Any]]:
+    """Direct TikTok extraction using alternative methods"""
+    try:
+        # Try direct CDN extraction first
+        info = await extract_tiktok_cdn_direct(url)
+        if info:
+            return info
+        
+        # Method 1: Try with updated yt-dlp options
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': True,
+            'skip_download': True,
+            'ignoreerrors': True,
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1'
+            }
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            try:
+                info = ydl.extract_info(url, download=False)
+                if info and not info.get('_type') == 'playlist':
+                    return info
+            except Exception as e:
+                logger.warning(f"Direct TikTok extraction failed: {e}")
+        
+        # Method 2: Try with different extractor
+        ydl_opts.update({
+            'extractor_args': {
+                'tiktok': {
+                    'api_hostname': 'api16-normal-c-useast1a.tiktokv.com',
+                    'app_version': '1.0.0',
+                    'manifest_app_version': '1.0.0'
+                }
+            }
+        })
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            try:
+                info = ydl.extract_info(url, download=False)
+                if info and not info.get('_type') == 'playlist':
+                    return info
+            except Exception as e:
+                logger.warning(f"TikTok with extractor args failed: {e}")
+        
+        # Method 3: Try with cookies
+        ydl_opts.update({
+            'cookiesfrombrowser': ('chrome',),
+            'extract_flat': False
+        })
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            try:
+                info = ydl.extract_info(url, download=False)
+                if info and not info.get('_type') == 'playlist':
+                    return info
+            except Exception as e:
+                logger.warning(f"TikTok with cookies failed: {e}")
+        
+        return None
+        
+    except Exception as e:
+        logger.error(f"All TikTok extraction methods failed: {e}")
+        return None
+
+async def extract_tiktok_info(url: str) -> Optional[Dict[str, Any]]:
     """Specialized TikTok extraction to bypass sigi state issues"""
     try:
-        # Try with updated yt-dlp options
+        # Try direct extraction first
+        info = await extract_tiktok_info_direct(url)
+        if info:
+            return info
+        
+        # Fallback: Try with standard yt-dlp but with different options
         ydl_opts = get_yt_dlp_opts('tiktok')
         ydl_opts.update({
-            'extract_flat': True,  # Try flat extraction first
+            'extract_flat': True,
             'ignoreerrors': True,
         })
         
@@ -311,18 +489,6 @@ async def extract_tiktok_info(url: str) -> Dict[str, Any]:
                     return info
             except Exception as e:
                 logger.warning(f"Mobile user agent extraction failed: {e}")
-        
-        # Try with cookies
-        ydl_opts = get_yt_dlp_opts('tiktok')
-        ydl_opts['cookiesfrombrowser'] = ('chrome',)
-        
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            try:
-                info = ydl.extract_info(url, download=False)
-                if info and not info.get('_type') == 'playlist':
-                    return info
-            except Exception as e:
-                logger.warning(f"Cookie extraction failed: {e}")
         
         return None
         
@@ -411,6 +577,9 @@ async def extract_social_media_info(url: str, include_media_urls: bool = True, i
                 result["medias"] = []  # Don't include media for playlists
             elif len(result["medias"]) > 1:
                 result["type"] = "multiple"
+        else:
+            result["error"] = True
+            result["error_message"] = "Failed to extract information from the URL"
         
         # Calculate time_end (extraction time in milliseconds)
         extraction_time = time.time() - start_time
