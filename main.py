@@ -87,7 +87,7 @@ class SocialMediaInfo(BaseModel):
     type: str = "single"
     error: bool = False
     error_message: Optional[str] = None
-    extraction_time: float
+    time_end: Optional[int] = None
 
 def detect_platform(url: str) -> str:
     """Detect the social media platform from URL"""
@@ -203,6 +203,65 @@ def get_yt_dlp_opts() -> Dict[str, Any]:
         }
     }
 
+def categorize_media_format(format_info: Dict[str, Any], platform: str) -> Dict[str, Any]:
+    """Categorize media format based on platform and format info"""
+    media_info = {
+        "url": format_info.get('url'),
+        "data_size": format_info.get('filesize'),
+        "quality": None,
+        "extension": format_info.get('ext'),
+        "type": "video",
+        "duration": format_info.get('duration')
+    }
+    
+    # Determine media type
+    if format_info.get('vcodec') == 'none' and format_info.get('acodec') != 'none':
+        media_info["type"] = "audio"
+    elif format_info.get('vcodec') != 'none':
+        media_info["type"] = "video"
+    
+    # Set quality based on platform and format
+    if platform == 'tiktok':
+        if media_info["type"] == "audio":
+            media_info["quality"] = "audio"
+        else:
+            # Determine TikTok video quality
+            height = format_info.get('height', 0)
+            if height >= 1080:
+                media_info["quality"] = "hd_no_watermark"
+            elif height >= 720:
+                media_info["quality"] = "no_watermark"
+            else:
+                media_info["quality"] = "watermark"
+    elif platform == 'youtube':
+        if media_info["type"] == "audio":
+            media_info["quality"] = "audio"
+        else:
+            height = format_info.get('height', 0)
+            if height >= 1080:
+                media_info["quality"] = "1080p"
+            elif height >= 720:
+                media_info["quality"] = "720p"
+            elif height >= 480:
+                media_info["quality"] = "480p"
+            else:
+                media_info["quality"] = "360p"
+    else:
+        # Generic quality detection
+        height = format_info.get('height', 0)
+        if media_info["type"] == "audio":
+            media_info["quality"] = "audio"
+        elif height >= 1080:
+            media_info["quality"] = "hd"
+        elif height >= 720:
+            media_info["quality"] = "hd"
+        elif height >= 480:
+            media_info["quality"] = "sd"
+        else:
+            media_info["quality"] = "low"
+    
+    return media_info
+
 async def extract_social_media_info(url: str, include_media_urls: bool = True, include_thumbnail: bool = True, include_audio: bool = False) -> Dict[str, Any]:
     """Extract comprehensive information from social media URL"""
     start_time = time.time()
@@ -233,7 +292,7 @@ async def extract_social_media_info(url: str, include_media_urls: bool = True, i
             "type": "single",
             "error": False,
             "error_message": None,
-            "extraction_time": 0
+            "time_end": None
         }
         
         # Use yt-dlp to extract information
@@ -262,14 +321,7 @@ async def extract_social_media_info(url: str, include_media_urls: bool = True, i
                         formats = info.get('formats', [])
                         
                         for format_info in formats:
-                            media_info = {
-                                "url": format_info.get('url'),
-                                "data_size": format_info.get('filesize'),
-                                "quality": format_info.get('format_note'),
-                                "extension": format_info.get('ext'),
-                                "type": "video" if format_info.get('vcodec') != 'none' else "audio",
-                                "duration": format_info.get('duration')
-                            }
+                            media_info = categorize_media_format(format_info, platform)
                             
                             # Filter based on preferences
                             if not include_audio and media_info["type"] == "audio":
@@ -281,13 +333,18 @@ async def extract_social_media_info(url: str, include_media_urls: bool = True, i
                     if info.get('_type') == 'playlist':
                         result["type"] = "playlist"
                         result["medias"] = []  # Don't include media for playlists
+                    elif len(result["medias"]) > 1:
+                        result["type"] = "multiple"
                     
             except Exception as e:
                 result["error"] = True
                 result["error_message"] = str(e)
                 logger.error(f"Error extracting info from {url}: {e}")
         
-        result["extraction_time"] = round(time.time() - start_time, 3)
+        # Calculate time_end (extraction time in milliseconds)
+        extraction_time = time.time() - start_time
+        result["time_end"] = int(extraction_time * 1000)  # Convert to milliseconds
+        
         return result
         
     except Exception as e:
@@ -296,7 +353,7 @@ async def extract_social_media_info(url: str, include_media_urls: bool = True, i
             "source": detect_platform(url),
             "error": True,
             "error_message": str(e),
-            "extraction_time": round(time.time() - start_time, 3)
+            "time_end": int((time.time() - start_time) * 1000)
         }
         logger.error(f"Error processing {url}: {e}")
         return result
