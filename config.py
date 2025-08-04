@@ -40,9 +40,7 @@ class Config:
     TASK_CLEANUP_INTERVAL = int(os.getenv('TASK_CLEANUP_INTERVAL', '3600'))  # Cleanup every hour
     TASK_RETENTION_HOURS = int(os.getenv('TASK_RETENTION_HOURS', '24'))  # Keep tasks for 24 hours
     
-    # Rate Limiting
-    RATE_LIMIT = int(os.getenv('RATE_LIMIT', '10'))  # requests per minute per IP
-    GLOBAL_RATE_LIMIT = int(os.getenv('GLOBAL_RATE_LIMIT', '100'))  # global requests per minute
+    # Rate Limiting - Removed (RapidAPI handles rate limiting)
     
     # Worker Configuration
     WORKER_POOL_SIZE = int(os.getenv('WORKER_POOL_SIZE', '10'))  # Number of worker processes
@@ -68,6 +66,60 @@ class Config:
         print(f"Max Concurrent Downloads: {cls.MAX_CONCURRENT_DOWNLOADS}")
         print(f"Max Memory Tasks: {cls.MAX_MEMORY_TASKS}")
         print(f"Worker Pool Size: {cls.WORKER_POOL_SIZE}")
-        print(f"Rate Limit: {cls.RATE_LIMIT} requests/minute per IP")
-        print(f"Global Rate Limit: {cls.GLOBAL_RATE_LIMIT} requests/minute")
-        print("=" * 40) 
+        print(f"Rate Limiting: Handled by RapidAPI")
+        print("=" * 40)
+    
+    @classmethod
+    def calculate_optimal_concurrency(cls, available_ram_gb: float = None, cpu_cores: int = None):
+        """Calculate optimal concurrency settings based on system resources"""
+        import psutil
+        
+        if available_ram_gb is None:
+            available_ram_gb = psutil.virtual_memory().total / (1024**3)
+        
+        if cpu_cores is None:
+            cpu_cores = psutil.cpu_count(logical=True)
+        
+        # Memory-based calculation (conservative)
+        # Each download uses ~150MB on average
+        memory_per_download_mb = 150
+        max_downloads_by_memory = int((available_ram_gb * 1024 * 0.7) / memory_per_download_mb)  # Use 70% of RAM
+        
+        # CPU-based calculation
+        # Each download can use 1-2 cores, but we want to leave some for the system
+        max_downloads_by_cpu = int(cpu_cores * 0.8)  # Use 80% of CPU cores
+        
+        # Network-based calculation (assuming 100 Mbps connection)
+        # Each download can use ~10 Mbps
+        network_mbps = 100  # Conservative estimate
+        max_downloads_by_network = int(network_mbps / 10)
+        
+        # Take the minimum of all constraints
+        optimal_concurrent_downloads = min(max_downloads_by_memory, max_downloads_by_cpu, max_downloads_by_network)
+        
+        # Ensure reasonable limits
+        optimal_concurrent_downloads = max(10, min(optimal_concurrent_downloads, 100))
+        
+        # Calculate other settings
+        optimal_memory_tasks = int(optimal_concurrent_downloads * 20)  # 20x for task history
+        optimal_global_rate_limit = int(optimal_concurrent_downloads * 2)  # 2x for queuing
+        
+        return {
+            "system_resources": {
+                "available_ram_gb": round(available_ram_gb, 2),
+                "cpu_cores": cpu_cores,
+                "estimated_network_mbps": network_mbps
+            },
+            "calculations": {
+                "max_by_memory": max_downloads_by_memory,
+                "max_by_cpu": max_downloads_by_cpu,
+                "max_by_network": max_downloads_by_network,
+                "limiting_factor": "memory" if max_downloads_by_memory <= max_downloads_by_cpu else "cpu" if max_downloads_by_cpu <= max_downloads_by_network else "network"
+            },
+            "recommended_settings": {
+                "MAX_CONCURRENT_DOWNLOADS": optimal_concurrent_downloads,
+                "MAX_MEMORY_TASKS": optimal_memory_tasks,
+                "GLOBAL_RATE_LIMIT": optimal_global_rate_limit,
+                "WORKER_POOL_SIZE": max(5, int(optimal_concurrent_downloads / 5))
+            }
+        } 

@@ -113,47 +113,7 @@ download_status = {}
 active_downloads = 0  # Track active downloads
 download_semaphore = asyncio.Semaphore(Config.MAX_CONCURRENT_DOWNLOADS)
 
-# Rate limiting (requests per minute per IP and global)
-rate_limit_store = {}
-global_rate_limit_store = []
-RATE_LIMIT = Config.RATE_LIMIT  # requests per minute per IP
-GLOBAL_RATE_LIMIT = Config.GLOBAL_RATE_LIMIT  # global requests per minute
-
-def check_rate_limit(client_ip: str) -> bool:
-    """Enhanced rate limiting by IP address and global limits"""
-    import time
-    current_time = time.time()
-    
-    # Global rate limiting
-    global global_rate_limit_store
-    global_rate_limit_store = [
-        req_time for req_time in global_rate_limit_store 
-        if current_time - req_time < 60
-    ]
-    
-    if len(global_rate_limit_store) >= GLOBAL_RATE_LIMIT:
-        logger.warning(f"Global rate limit exceeded: {len(global_rate_limit_store)} requests in last minute")
-        return False
-    
-    # Per-IP rate limiting
-    if client_ip not in rate_limit_store:
-        rate_limit_store[client_ip] = []
-    
-    # Remove old requests (older than 1 minute)
-    rate_limit_store[client_ip] = [
-        req_time for req_time in rate_limit_store[client_ip] 
-        if current_time - req_time < 60
-    ]
-    
-    # Check if limit exceeded
-    if len(rate_limit_store[client_ip]) >= RATE_LIMIT:
-        logger.warning(f"Rate limit exceeded for IP {client_ip}: {len(rate_limit_store[client_ip])} requests in last minute")
-        return False
-    
-    # Add current request to both stores
-    rate_limit_store[client_ip].append(current_time)
-    global_rate_limit_store.append(current_time)
-    return True
+# Rate limiting removed - RapidAPI handles rate limiting
 
 async def cleanup_old_tasks():
     """Clean up old completed tasks from memory"""
@@ -174,24 +134,7 @@ async def cleanup_old_tasks():
     if tasks_to_remove:
         logger.info(f"Cleaned up {len(tasks_to_remove)} old tasks from memory")
     
-    # Also clean up rate limit stores
-    global rate_limit_store, global_rate_limit_store
-    current_time = time.time()
-    
-    # Clean up IP rate limit store
-    for ip in list(rate_limit_store.keys()):
-        rate_limit_store[ip] = [
-            req_time for req_time in rate_limit_store[ip] 
-            if current_time - req_time < 60
-        ]
-        if not rate_limit_store[ip]:
-            del rate_limit_store[ip]
-    
-    # Clean up global rate limit store
-    global_rate_limit_store = [
-        req_time for req_time in global_rate_limit_store 
-        if current_time - req_time < 60
-    ]
+    # Rate limiting cleanup removed - RapidAPI handles rate limiting
 
 # Initialize enhanced downloader if available
 if ENHANCED_DOWNLOADER_AVAILABLE:
@@ -529,10 +472,8 @@ async def system_status():
         },
         "tasks": task_counts,
         "rate_limiting": {
-            "rate_limit_per_ip": RATE_LIMIT,
-            "global_rate_limit": GLOBAL_RATE_LIMIT,
-            "active_ips": len(rate_limit_store),
-            "global_requests_last_minute": len(global_rate_limit_store)
+            "note": "Rate limiting handled by RapidAPI",
+            "rapidapi_managed": True
         },
         "configuration": {
             "download_timeout": Config.DOWNLOAD_TIMEOUT,
@@ -545,8 +486,7 @@ async def system_status():
 @app.post("/download", response_model=DownloadResponse)
 async def download_video(
     request: VideoRequest,
-    background_tasks: BackgroundTasks,
-    client_ip: str = None
+    background_tasks: BackgroundTasks
 ):
     """Start a video download task
     
@@ -560,13 +500,6 @@ async def download_video(
     Note: All downloads are streamed directly to MinIO without saving locally
     """
     try:
-        # Rate limiting (if client_ip provided)
-        if client_ip and not check_rate_limit(client_ip):
-            raise HTTPException(
-                status_code=429, 
-                detail=f"Rate limit exceeded. Maximum {RATE_LIMIT} requests per minute."
-            )
-        
         task_id = str(uuid.uuid4())
         
         # Initialize task status immediately
@@ -578,7 +511,7 @@ async def download_video(
             'download_url': None,
             'storage_type': 'minio',  # Changed to minio since local storage is disabled
             'file_size': None,
-            'client_ip': client_ip,
+            'client_ip': None,  # RapidAPI handles client tracking
             'created_at': time.time()
         }
         
@@ -590,7 +523,7 @@ async def download_video(
                     'url': str(request.url),
                     'status': 'starting',
                     'progress': 0.0,
-                    'client_ip': client_ip,
+                    'client_ip': None,  # RapidAPI handles client tracking
                     'storage_type': 'minio'
                 }
                 await db_manager.create_task(task_data)
