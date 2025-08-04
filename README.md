@@ -75,6 +75,7 @@ MINIO_ACCESS_KEY=your-access-key
 MINIO_SECRET_KEY=your-secret-key
 MINIO_SECURE=true
 MINIO_BUCKET=video-downloads
+MINIO_URL_EXPIRY=43200  # 12 hours in seconds (43200 = 12 * 60 * 60)
 
 # API Configuration
 API_HOST=0.0.0.0
@@ -135,6 +136,8 @@ GET /status/{task_id}
 ```http
 GET /download_file/{task_id}
 ```
+
+**Note**: This endpoint redirects to a MinIO presigned URL that expires after 12 hours. The expiration time can be configured via the `MINIO_URL_EXPIRY` environment variable.
 
 #### 4. **Get Video Information**
 ```http

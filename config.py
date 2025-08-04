@@ -22,7 +22,7 @@ class Config:
     MINIO_SECRET_KEY = os.getenv('MINIO_SECRET_KEY', 'o86Lv2Ta-x1rk-SHd5RK0B')
     MINIO_SECURE = os.getenv('MINIO_SECURE', 'true').lower() == 'true'
     MINIO_BUCKET = os.getenv('MINIO_BUCKET', 'video-downloads')
-    MINIO_URL_EXPIRY = int(os.getenv('MINIO_URL_EXPIRY', '86400'))  # 24 hours in seconds
+    MINIO_URL_EXPIRY = int(os.getenv('MINIO_URL_EXPIRY', '43200'))  # 12 hours in seconds
     
     # API Configuration
     API_HOST = os.getenv('API_HOST', '0.0.0.0')

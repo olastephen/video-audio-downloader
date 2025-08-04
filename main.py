@@ -524,7 +524,7 @@ async def get_download_status(task_id: str):
 
 @app.get("/download_file/{task_id}")
 async def download_file(task_id: str):
-    """Download the completed video file"""
+    """Download the completed video file by redirecting to MinIO URL"""
     # Check in-memory status first
     status_info = None
     if task_id in download_status:
@@ -555,12 +555,9 @@ async def download_file(task_id: str):
     
     # Only MinIO storage is supported (local storage disabled)
     if status_info.get('storage_type') == 'minio' and status_info.get('download_url'):
-        return JSONResponse({
-            "download_url": status_info['download_url'],
-            "storage_type": "minio",
-            "file_size": status_info.get('file_size'),
-            "message": "File is available via MinIO. Use the download_url to access the file."
-        })
+        # Redirect to the MinIO download URL
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url=status_info['download_url'])
     
     # No local storage fallback
     raise HTTPException(

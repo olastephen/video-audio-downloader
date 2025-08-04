@@ -29,7 +29,7 @@ class MinIOStorage:
             self.secret_key = os.getenv('MINIO_SECRET_KEY', 'o86Lv2Ta-x1rk-SHd5RK0B')
             self.secure = os.getenv('MINIO_SECURE', 'true').lower() == 'true'
             self.bucket_name = os.getenv('MINIO_BUCKET', 'video-downloads')
-            self.url_expiry = int(os.getenv('MINIO_URL_EXPIRY', '86400'))
+            self.url_expiry = int(os.getenv('MINIO_URL_EXPIRY', '43200'))
             logger.info(f"Using environment variables for MinIO settings")
             logger.info(f"MinIO endpoint from env: {self.endpoint}")
         
