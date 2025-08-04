@@ -12,6 +12,8 @@ import uuid
 import logging
 import time
 from pathlib import Path
+import requests
+import re
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -178,9 +180,9 @@ def extract_unique_id(url: str, platform: str) -> Optional[str]:
         pass
     return None
 
-def get_yt_dlp_opts() -> Dict[str, Any]:
+def get_yt_dlp_opts(platform: str = None) -> Dict[str, Any]:
     """Get yt-dlp options for metadata extraction"""
-    return {
+    base_opts = {
         'quiet': True,
         'no_warnings': True,
         'extract_flat': False,
@@ -192,16 +194,34 @@ def get_yt_dlp_opts() -> Dict[str, Any]:
         'ignoreerrors': False,
         'no_check_certificate': True,
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-us,en;q=0.5',
-            'Accept-Encoding': 'gzip,deflate',
-            'Accept-Charset': 'ISO-8859-1,utf-8;q=0.7,*;q=0.7',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
             'DNT': '1',
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Cache-Control': 'max-age=0'
         }
     }
+    
+    # Platform-specific options
+    if platform == 'tiktok':
+        base_opts.update({
+            'extractor_args': {
+                'tiktok': {
+                    'api_hostname': 'api16-normal-c-useast1a.tiktokv.com',
+                    'app_version': '1.0.0',
+                    'manifest_app_version': '1.0.0'
+                }
+            }
+        })
+    
+    return base_opts
 
 def categorize_media_format(format_info: Dict[str, Any], platform: str) -> Dict[str, Any]:
     """Categorize media format based on platform and format info"""
@@ -262,6 +282,54 @@ def categorize_media_format(format_info: Dict[str, Any], platform: str) -> Dict[
     
     return media_info
 
+async def extract_tiktok_info(url: str) -> Dict[str, Any]:
+    """Specialized TikTok extraction to bypass sigi state issues"""
+    try:
+        # Try with updated yt-dlp options
+        ydl_opts = get_yt_dlp_opts('tiktok')
+        ydl_opts.update({
+            'extract_flat': True,  # Try flat extraction first
+            'ignoreerrors': True,
+        })
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            try:
+                info = ydl.extract_info(url, download=False)
+                if info and not info.get('_type') == 'playlist':
+                    return info
+            except Exception as e:
+                logger.warning(f"Flat extraction failed: {e}")
+        
+        # Try with different user agent
+        ydl_opts = get_yt_dlp_opts('tiktok')
+        ydl_opts['http_headers']['User-Agent'] = 'Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Mobile/15E148 Safari/604.1'
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            try:
+                info = ydl.extract_info(url, download=False)
+                if info and not info.get('_type') == 'playlist':
+                    return info
+            except Exception as e:
+                logger.warning(f"Mobile user agent extraction failed: {e}")
+        
+        # Try with cookies
+        ydl_opts = get_yt_dlp_opts('tiktok')
+        ydl_opts['cookiesfrombrowser'] = ('chrome',)
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            try:
+                info = ydl.extract_info(url, download=False)
+                if info and not info.get('_type') == 'playlist':
+                    return info
+            except Exception as e:
+                logger.warning(f"Cookie extraction failed: {e}")
+        
+        return None
+        
+    except Exception as e:
+        logger.error(f"TikTok extraction failed: {e}")
+        return None
+
 async def extract_social_media_info(url: str, include_media_urls: bool = True, include_thumbnail: bool = True, include_audio: bool = False) -> Dict[str, Any]:
     """Extract comprehensive information from social media URL"""
     start_time = time.time()
@@ -295,51 +363,54 @@ async def extract_social_media_info(url: str, include_media_urls: bool = True, i
             "time_end": None
         }
         
-        # Use yt-dlp to extract information
-        ydl_opts = get_yt_dlp_opts()
+        # Platform-specific extraction
+        if platform == 'tiktok':
+            info = await extract_tiktok_info(url)
+        else:
+            # Use standard yt-dlp for other platforms
+            ydl_opts = get_yt_dlp_opts(platform)
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                try:
+                    info = ydl.extract_info(url, download=False)
+                except Exception as e:
+                    info = None
+                    result["error"] = True
+                    result["error_message"] = str(e)
+                    logger.error(f"Error extracting info from {url}: {e}")
         
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            try:
-                # Extract info
-                info = ydl.extract_info(url, download=False)
+        if info and not result["error"]:
+            # Basic information
+            result["author"] = info.get('uploader')
+            result["title"] = info.get('title')
+            result["description"] = info.get('description')
+            result["duration"] = info.get('duration')
+            result["view_count"] = info.get('view_count')
+            result["upload_date"] = info.get('upload_date')
+            
+            # Thumbnail
+            if include_thumbnail and info.get('thumbnail'):
+                result["thumbnail"] = info.get('thumbnail')
+            
+            # Media formats
+            if include_media_urls and info.get('formats'):
+                formats = info.get('formats', [])
                 
-                if info:
-                    # Basic information
-                    result["author"] = info.get('uploader')
-                    result["title"] = info.get('title')
-                    result["description"] = info.get('description')
-                    result["duration"] = info.get('duration')
-                    result["view_count"] = info.get('view_count')
-                    result["upload_date"] = info.get('upload_date')
+                for format_info in formats:
+                    media_info = categorize_media_format(format_info, platform)
                     
-                    # Thumbnail
-                    if include_thumbnail and info.get('thumbnail'):
-                        result["thumbnail"] = info.get('thumbnail')
-                    
-                    # Media formats
-                    if include_media_urls and info.get('formats'):
-                        formats = info.get('formats', [])
+                    # Filter based on preferences
+                    if not include_audio and media_info["type"] == "audio":
+                        continue
                         
-                        for format_info in formats:
-                            media_info = categorize_media_format(format_info, platform)
-                            
-                            # Filter based on preferences
-                            if not include_audio and media_info["type"] == "audio":
-                                continue
-                                
-                            result["medias"].append(media_info)
-                    
-                    # Handle playlists
-                    if info.get('_type') == 'playlist':
-                        result["type"] = "playlist"
-                        result["medias"] = []  # Don't include media for playlists
-                    elif len(result["medias"]) > 1:
-                        result["type"] = "multiple"
-                    
-            except Exception as e:
-                result["error"] = True
-                result["error_message"] = str(e)
-                logger.error(f"Error extracting info from {url}: {e}")
+                    result["medias"].append(media_info)
+            
+            # Handle playlists
+            if info.get('_type') == 'playlist':
+                result["type"] = "playlist"
+                result["medias"] = []  # Don't include media for playlists
+            elif len(result["medias"]) > 1:
+                result["type"] = "multiple"
         
         # Calculate time_end (extraction time in milliseconds)
         extraction_time = time.time() - start_time
