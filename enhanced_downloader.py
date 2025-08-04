@@ -176,10 +176,9 @@ class EnhancedVideoDownloader:
             'buffersize': 1024,
             'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             # Enhanced social media compatibility
-            # 'cookiesfrombrowser': ('chrome',),  # Disabled due to Chrome cookie database issues
+            # Disable all browser cookie extraction to avoid keyring issues
             'cookiefile': None,  # Allow cookie file if available
-            # Alternative cookie sources (if available)
-            'cookiesfrombrowser': ('firefox', 'edge', 'safari'),  # Try other browsers if Chrome fails
+            # No browser cookie extraction to avoid keyring errors
             'extract_flat': False,
             'writeinfojson': False,
             'writesubtitles': False,
@@ -811,14 +810,16 @@ class EnhancedVideoDownloader:
             # Try different download methods for streaming
             platform = self.detect_platform(url)
             
-            # Method 1: Try yt-dlp with custom output template to stdout
+            # Method 1: Try yt-dlp with proper streaming
             try:
                 logger.info("Attempting yt-dlp streaming to MinIO...")
                 ydl_opts = self.get_yt_dlp_opts(quality, format, audio_only)
                 ydl_opts.update({
                     'outtmpl': '-',  # Output to stdout
                     'quiet': False,
-                    'progress_hooks': [self._progress_hook]
+                    'progress_hooks': [self._progress_hook],
+                    'no_warnings': False,
+                    'verbose': True
                 })
                 
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -828,65 +829,76 @@ class EnhancedVideoDownloader:
                     
                     # Download to memory buffer
                     import io
-                    buffer = io.BytesIO()
+                    import subprocess
+                    import tempfile
                     
-                    # Create a custom progress hook that writes to buffer
-                    def stream_progress_hook(d):
-                        if d['status'] == 'downloading':
-                            # Write downloaded chunks to buffer
-                            if 'downloaded_bytes' in d and 'total_bytes' in d:
-                                progress = (d['downloaded_bytes'] / d['total_bytes']) * 100
-                                logger.info(f"Streaming progress: {progress:.1f}%")
+                    # Create a temporary file for the download
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{format}') as temp_file:
+                        temp_path = temp_file.name
                     
-                    ydl_opts['progress_hooks'] = [stream_progress_hook]
-                    
-                    # Download to buffer
-                    ydl.download([url])
-                    
-                    # Get the downloaded data
-                    buffer.seek(0)
-                    data = buffer.getvalue()
-                    
-                    if data:
-                        # Upload to MinIO
-                        result = minio_storage.upload_from_memory(data, object_name, f"video/{format}")
-                        if result.get('success'):
-                            logger.info(f"Successfully streamed to MinIO: {object_name}")
-                            return object_name
+                    try:
+                        # Download to temporary file first
+                        ydl_opts['outtmpl'] = temp_path
+                        ydl.download([url])
+                        
+                        # Check if file was downloaded successfully and validate it
+                        if os.path.exists(temp_path) and self._validate_video_file(temp_path):
+                            # Read the file and upload to MinIO
+                            with open(temp_path, 'rb') as f:
+                                data = f.read()
+                            
+                            if data:
+                                # Upload to MinIO
+                                result = minio_storage.upload_from_memory(data, object_name, f"video/{format}")
+                                if result.get('success'):
+                                    logger.info(f"Successfully streamed to MinIO: {object_name}")
+                                    return object_name
+                                else:
+                                    raise Exception(f"MinIO upload failed: {result.get('error')}")
+                            else:
+                                raise Exception("No data downloaded")
                         else:
-                            raise Exception(f"MinIO upload failed: {result.get('error')}")
-                    else:
-                        raise Exception("No data downloaded")
+                            raise Exception("File download failed or file is empty")
+                    finally:
+                        # Clean up temporary file
+                        if os.path.exists(temp_path):
+                            os.remove(temp_path)
                         
             except Exception as e:
                 logger.warning(f"yt-dlp streaming failed: {e}")
             
-            # Method 2: Try direct URL streaming if available
+            # Method 2: Try direct URL streaming if available (only for direct video URLs)
             try:
                 logger.info("Attempting direct URL streaming to MinIO...")
-                result = minio_storage.upload_from_url_stream(url, object_name, f"video/{format}")
-                if result.get('success'):
-                    logger.info(f"Successfully streamed URL to MinIO: {object_name}")
-                    return object_name
+                # Only try direct URL streaming for known video file extensions
+                if any(ext in url.lower() for ext in ['.mp4', '.webm', '.avi', '.mov', '.mkv', '.flv', '.m4v']):
+                    result = minio_storage.upload_from_url_stream(url, object_name, f"video/{format}")
+                    if result.get('success'):
+                        logger.info(f"Successfully streamed URL to MinIO: {object_name}")
+                        return object_name
+                    else:
+                        raise Exception(f"URL streaming failed: {result.get('error')}")
                 else:
-                    raise Exception(f"URL streaming failed: {result.get('error')}")
+                    logger.info("Skipping direct URL streaming - not a direct video file URL")
+                    raise Exception("Not a direct video file URL")
                     
             except Exception as e:
                 logger.warning(f"Direct URL streaming failed: {e}")
             
-            # Method 3: Fallback to temporary file upload
+            # Method 3: Fallback to temporary file upload with enhanced error handling
             try:
                 logger.info("Attempting fallback download with temporary file...")
                 # Download to temporary file (force local download for fallback)
                 temp_file = self._download_video_local(url, quality, format, audio_only, direct_download=False)
                 
-                if temp_file and os.path.exists(temp_file):
+                if temp_file and os.path.exists(temp_file) and self._validate_video_file(temp_file):
+                    file_size = os.path.getsize(temp_file)
+                    logger.info(f"Temporary file downloaded and validated: {temp_file} ({file_size} bytes)")
+                    
                     try:
                         # Upload to MinIO
                         result = minio_storage.upload_file(temp_file, object_name)
                         if result.get('success'):
-                            # Clean up temporary file
-                            os.remove(temp_file)
                             logger.info(f"Successfully uploaded temporary file to MinIO: {object_name}")
                             return object_name
                         else:
@@ -895,6 +907,7 @@ class EnhancedVideoDownloader:
                         # Ensure temporary file is cleaned up
                         if os.path.exists(temp_file):
                             os.remove(temp_file)
+                            logger.info(f"Cleaned up temporary file: {temp_file}")
                 else:
                     raise Exception("Temporary file download failed")
                     
@@ -962,6 +975,45 @@ class EnhancedVideoDownloader:
         
         # If all social media downloaders fail
         raise Exception(f"All social media download methods failed for URL: {url}. Platform: {platform}")
+    
+    def _validate_video_file(self, file_path: str) -> bool:
+        """
+        Validate that a downloaded file is a proper video file
+        
+        Args:
+            file_path: Path to the file to validate
+            
+        Returns:
+            True if file is valid, False otherwise
+        """
+        try:
+            if not os.path.exists(file_path):
+                return False
+            
+            file_size = os.path.getsize(file_path)
+            if file_size == 0:
+                logger.warning(f"File is empty: {file_path}")
+                return False
+            
+            # Check file extension
+            valid_extensions = ['.mp4', '.webm', '.avi', '.mov', '.mkv', '.flv', '.m4v', '.mp3', '.m4a', '.wav', '.aac']
+            file_ext = os.path.splitext(file_path)[1].lower()
+            
+            if file_ext not in valid_extensions:
+                logger.warning(f"Invalid file extension: {file_ext}")
+                return False
+            
+            # Check minimum file size (1KB)
+            if file_size < 1024:
+                logger.warning(f"File too small: {file_size} bytes")
+                return False
+            
+            logger.info(f"File validation passed: {file_path} ({file_size} bytes)")
+            return True
+            
+        except Exception as e:
+            logger.error(f"File validation failed: {e}")
+            return False
     
     def get_video_info(self, url: str) -> Dict[str, Any]:
         """Get video information without downloading"""
