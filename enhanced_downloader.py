@@ -802,10 +802,15 @@ class EnhancedVideoDownloader:
             if not minio_storage.client:
                 raise Exception("MinIO client not available")
             
-            # Generate unique object name
+            # Generate unique object name with proper extension
             import uuid
             import time
-            object_name = f"video_{int(time.time())}_{uuid.uuid4().hex[:8]}.{format}"
+            import re
+            
+            # Default title
+            title = 'video'
+            
+            object_name = f"{title}_{int(time.time())}_{uuid.uuid4().hex[:8]}.{format}"
             
             # Try different download methods for streaming
             platform = self.detect_platform(url)
@@ -825,7 +830,15 @@ class EnhancedVideoDownloader:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     # Get video info first
                     info = ydl.extract_info(url, download=False)
-                    title = info.get('title', 'unknown_title')
+                    title = info.get('title', 'video')
+                    
+                    # Clean the title for filename
+                    import re
+                    safe_title = re.sub(r'[<>:"/\\|?*]', '_', title)
+                    safe_title = safe_title[:50]  # Limit length
+                    
+                    # Update object name with proper title
+                    object_name = f"{safe_title}_{int(time.time())}_{uuid.uuid4().hex[:8]}.{format}"
                     
                     # Download to memory buffer
                     import io

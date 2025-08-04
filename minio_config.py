@@ -67,6 +67,46 @@ class MinIOStorage:
             logger.error(f"MinIO connection test failed: {e}")
             raise
     
+    def _get_content_type(self, file_path: str) -> str:
+        """
+        Determine the MIME content type based on file extension
+        
+        Args:
+            file_path: Path to the file
+            
+        Returns:
+            MIME content type string
+        """
+        import mimetypes
+        
+        # Get file extension
+        file_ext = os.path.splitext(file_path)[1].lower()
+        
+        # Define common video/audio MIME types
+        mime_types = {
+            '.mp4': 'video/mp4',
+            '.webm': 'video/webm',
+            '.avi': 'video/x-msvideo',
+            '.mov': 'video/quicktime',
+            '.mkv': 'video/x-matroska',
+            '.flv': 'video/x-flv',
+            '.m4v': 'video/x-m4v',
+            '.mp3': 'audio/mpeg',
+            '.m4a': 'audio/mp4',
+            '.wav': 'audio/wav',
+            '.aac': 'audio/aac',
+            '.ogg': 'audio/ogg',
+            '.wma': 'audio/x-ms-wma'
+        }
+        
+        # Return specific MIME type if known, otherwise use mimetypes module
+        if file_ext in mime_types:
+            return mime_types[file_ext]
+        else:
+            # Fallback to mimetypes module
+            content_type, _ = mimetypes.guess_type(file_path)
+            return content_type or 'application/octet-stream'
+    
     def _ensure_bucket_exists(self):
         """Ensure the bucket exists, create if it doesn't"""
         try:
@@ -102,11 +142,15 @@ class MinIOStorage:
             if not object_name:
                 object_name = os.path.basename(file_path)
             
-            # Upload the file
+            # Determine content type based on file extension
+            content_type = self._get_content_type(file_path)
+            
+            # Upload the file with proper content type
             self.client.fput_object(
                 bucket_name=self.bucket_name,
                 object_name=object_name,
-                file_path=file_path
+                file_path=file_path,
+                content_type=content_type
             )
             
             # Generate presigned URL for download (valid for configured time)
@@ -169,7 +213,7 @@ class MinIOStorage:
                 temp_file_path = temp_file.name
             
             try:
-                # Upload using the temporary file
+                # Upload using the temporary file with proper content type
                 return self.upload_file(temp_file_path, object_name)
             finally:
                 # Clean up temporary file
@@ -352,13 +396,14 @@ class MinIOStorage:
             logger.error(f"Error listing files: {e}")
             return []
     
-    def generate_download_url(self, object_name: str, expires: int = None) -> Optional[str]:
+    def generate_download_url(self, object_name: str, expires: int = None, response_headers: Dict[str, str] = None) -> Optional[str]:
         """
-        Generate a presigned download URL
+        Generate a presigned download URL with optional response headers
         
         Args:
             object_name: Name of the object
             expires: URL expiration time in seconds (defaults to MINIO_URL_EXPIRY from config)
+            response_headers: Optional response headers to include in the URL
             
         Returns:
             Presigned URL or None if error
@@ -371,11 +416,29 @@ class MinIOStorage:
             # Use configured expiry time if not specified
             if expires is None:
                 expires = self.url_expiry
+            
+            # Set default response headers for proper file download
+            if response_headers is None:
+                # Get file info to set proper content type
+                try:
+                    stat = self.client.stat_object(self.bucket_name, object_name)
+                    content_type = stat.content_type
+                except:
+                    content_type = 'application/octet-stream'
+                
+                # Extract filename from object name
+                filename = os.path.basename(object_name)
+                
+                response_headers = {
+                    'response-content-type': content_type,
+                    'response-content-disposition': f'attachment; filename="{filename}"'
+                }
                 
             return self.client.presigned_get_object(
                 bucket_name=self.bucket_name,
                 object_name=object_name,
-                expires=timedelta(seconds=expires)
+                expires=timedelta(seconds=expires),
+                response_headers=response_headers
             )
         except S3Error as e:
             logger.error(f"Error generating download URL for {object_name}: {e}")

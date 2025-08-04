@@ -289,7 +289,7 @@ async def download_video_task(task_id: str, url: str, quality: str = "best", for
                     object_name = f"{task_id}_{filename}"
                     minio_storage.upload_file(downloaded_file, object_name)
                 
-                # Get presigned URL
+                # Get presigned URL with proper headers
                 download_url = minio_storage.generate_download_url(object_name)
                 
                 # Clean up local file (only if it's a local file)
@@ -555,9 +555,20 @@ async def download_file(task_id: str):
     
     # Only MinIO storage is supported (local storage disabled)
     if status_info.get('storage_type') == 'minio' and status_info.get('download_url'):
-        # Redirect to the MinIO download URL
+        # Redirect to the MinIO download URL with proper headers
         from fastapi.responses import RedirectResponse
-        return RedirectResponse(url=status_info['download_url'])
+        
+        # Get the download URL (it should already have proper headers from MinIO)
+        download_url = status_info['download_url']
+        
+        # Create redirect response with proper headers
+        response = RedirectResponse(url=download_url)
+        
+        # Add additional headers for better file handling
+        response.headers["Cache-Control"] = "no-cache"
+        response.headers["Pragma"] = "no-cache"
+        
+        return response
     
     # No local storage fallback
     raise HTTPException(
