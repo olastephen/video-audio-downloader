@@ -4,5 +4,4 @@ pydantic==2.6.1
 python-dotenv==1.0.1
 yt-dlp==2024.3.10
 requests==2.31.0
-tiktok-api==0.1.9
 tiktok-downloader==0.4.0 
