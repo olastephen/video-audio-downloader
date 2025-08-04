@@ -82,18 +82,18 @@ async def start_cleanup_task():
         except Exception as e:
             logger.error(f"Error in cleanup task: {e}")
 
-# Start cleanup task when app starts
-@app.on_event("startup")
-async def startup_event():
-    """Startup event to initialize cleanup task"""
-    asyncio.create_task(start_cleanup_task())
-
 app = FastAPI(
     title="Video Downloader API",
     description="A powerful API to download videos from various platforms",
     version="1.0.0",
     lifespan=lifespan
 )
+
+# Start cleanup task when app starts
+@app.on_event("startup")
+async def startup_event():
+    """Startup event to initialize cleanup task"""
+    asyncio.create_task(start_cleanup_task())
 
 # Add CORS middleware
 app.add_middleware(
