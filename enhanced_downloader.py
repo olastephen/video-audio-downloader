@@ -502,9 +502,9 @@ class EnhancedVideoDownloader:
             logger.error(f"Direct URL extraction error: {e}")
             return False, f"Direct extraction error: {str(e)}", ""
     
-    def download_direct_video(self, url: str) -> str:
+    def download_direct_video(self, url: str, quality: str = "best", format: str = "mp4", audio_only: bool = False) -> str:
         """Download direct video files"""
-        logger.info(f"Attempting direct video download from: {url}")
+        logger.info(f"Attempting direct video download from: {url} (audio_only: {audio_only})")
         
         try:
             import requests
@@ -521,7 +521,11 @@ class EnhancedVideoDownloader:
                 if 'filename=' in content_disposition:
                     filename = content_disposition.split('filename=')[1].strip('"')
                 else:
-                    filename = f"video_{int(time.time())}.mp4"
+                    # Use appropriate extension based on audio_only
+                    if audio_only:
+                        filename = f"audio_{int(time.time())}.mp3"
+                    else:
+                        filename = f"video_{int(time.time())}.{format}"
             
             filepath = self.download_dir / filename
             
@@ -678,7 +682,49 @@ class EnhancedVideoDownloader:
             logger.info("Direct download requested - using direct download only")
             try:
                 logger.info("Attempting direct video download...")
-                return self.download_direct_video(url)
+                # For direct download, we still need to stream to MinIO
+                # Download to temporary file first, then upload to MinIO
+                temp_file = self.download_direct_video(url, quality, format, audio_only)
+                
+                if temp_file and os.path.exists(temp_file):
+                    # Import MinIO storage
+                    from minio_config import MinIOStorage
+                    minio_storage = MinIOStorage()
+                    
+                    if not minio_storage.client:
+                        raise Exception("MinIO client not available")
+                    
+                    # Generate unique object name
+                    import uuid
+                    import time
+                    import re
+                    
+                    # Get filename from temp file
+                    filename = os.path.basename(temp_file)
+                    name, ext = os.path.splitext(filename)
+                    
+                    # Clean the name for object name
+                    safe_name = re.sub(r'[<>:"/\\|?*]', '_', name)
+                    safe_name = safe_name[:50]  # Limit length
+                    
+                    object_name = f"{safe_name}_{int(time.time())}_{uuid.uuid4().hex[:8]}{ext}"
+                    
+                    try:
+                        # Upload to MinIO
+                        result = minio_storage.upload_file(temp_file, object_name)
+                        if result.get('success'):
+                            logger.info(f"Successfully uploaded direct download to MinIO: {object_name}")
+                            return object_name
+                        else:
+                            raise Exception(f"MinIO upload failed: {result.get('error')}")
+                    finally:
+                        # Clean up temporary file
+                        if os.path.exists(temp_file):
+                            os.remove(temp_file)
+                            logger.info(f"Cleaned up temporary direct download file: {temp_file}")
+                else:
+                    raise Exception("Direct download failed - no file created")
+                    
             except Exception as e:
                 logger.warning(f"Direct video download failed: {e}")
                 raise Exception(f"Direct download failed for URL: {url}")
@@ -807,10 +853,15 @@ class EnhancedVideoDownloader:
             import time
             import re
             
-            # Default title
-            title = 'video'
+            # Default title and extension based on audio_only
+            if audio_only:
+                title = 'audio'
+                default_ext = 'mp3'
+            else:
+                title = 'video'
+                default_ext = format
             
-            object_name = f"{title}_{int(time.time())}_{uuid.uuid4().hex[:8]}.{format}"
+            object_name = f"{title}_{int(time.time())}_{uuid.uuid4().hex[:8]}.{default_ext}"
             
             # Try different download methods for streaming
             platform = self.detect_platform(url)
@@ -837,8 +888,11 @@ class EnhancedVideoDownloader:
                     safe_title = re.sub(r'[<>:"/\\|?*]', '_', title)
                     safe_title = safe_title[:50]  # Limit length
                     
-                    # Update object name with proper title
-                    object_name = f"{safe_title}_{int(time.time())}_{uuid.uuid4().hex[:8]}.{format}"
+                    # Update object name with proper title and extension
+                    if audio_only:
+                        object_name = f"{safe_title}_{int(time.time())}_{uuid.uuid4().hex[:8]}.mp3"
+                    else:
+                        object_name = f"{safe_title}_{int(time.time())}_{uuid.uuid4().hex[:8]}.{format}"
                     
                     # Download to memory buffer
                     import io
@@ -861,8 +915,13 @@ class EnhancedVideoDownloader:
                                 data = f.read()
                             
                             if data:
-                                # Upload to MinIO
-                                result = minio_storage.upload_from_memory(data, object_name, f"video/{format}")
+                                # Upload to MinIO with correct content type
+                                if audio_only:
+                                    content_type = "audio/mpeg"
+                                else:
+                                    content_type = f"video/{format}"
+                                
+                                result = minio_storage.upload_from_memory(data, object_name, content_type)
                                 if result.get('success'):
                                     logger.info(f"Successfully streamed to MinIO: {object_name}")
                                     return object_name
@@ -883,17 +942,36 @@ class EnhancedVideoDownloader:
             # Method 2: Try direct URL streaming if available (only for direct video URLs)
             try:
                 logger.info("Attempting direct URL streaming to MinIO...")
-                # Only try direct URL streaming for known video file extensions
-                if any(ext in url.lower() for ext in ['.mp4', '.webm', '.avi', '.mov', '.mkv', '.flv', '.m4v']):
-                    result = minio_storage.upload_from_url_stream(url, object_name, f"video/{format}")
-                    if result.get('success'):
-                        logger.info(f"Successfully streamed URL to MinIO: {object_name}")
-                        return object_name
+                # Check for both video and audio file extensions
+                video_extensions = ['.mp4', '.webm', '.avi', '.mov', '.mkv', '.flv', '.m4v']
+                audio_extensions = ['.mp3', '.m4a', '.wav', '.aac', '.ogg', '.flac']
+                
+                if audio_only:
+                    # For audio_only, check audio extensions
+                    if any(ext in url.lower() for ext in audio_extensions):
+                        content_type = "audio/mpeg"
+                        result = minio_storage.upload_from_url_stream(url, object_name, content_type)
+                        if result.get('success'):
+                            logger.info(f"Successfully streamed audio URL to MinIO: {object_name}")
+                            return object_name
+                        else:
+                            raise Exception(f"Audio URL streaming failed: {result.get('error')}")
                     else:
-                        raise Exception(f"URL streaming failed: {result.get('error')}")
+                        logger.info("Skipping direct URL streaming - not a direct audio file URL")
+                        raise Exception("Not a direct audio file URL")
                 else:
-                    logger.info("Skipping direct URL streaming - not a direct video file URL")
-                    raise Exception("Not a direct video file URL")
+                    # For video, check video extensions
+                    if any(ext in url.lower() for ext in video_extensions):
+                        content_type = f"video/{format}"
+                        result = minio_storage.upload_from_url_stream(url, object_name, content_type)
+                        if result.get('success'):
+                            logger.info(f"Successfully streamed video URL to MinIO: {object_name}")
+                            return object_name
+                        else:
+                            raise Exception(f"Video URL streaming failed: {result.get('error')}")
+                    else:
+                        logger.info("Skipping direct URL streaming - not a direct video file URL")
+                        raise Exception("Not a direct video file URL")
                     
             except Exception as e:
                 logger.warning(f"Direct URL streaming failed: {e}")
@@ -1009,7 +1087,10 @@ class EnhancedVideoDownloader:
                 return False
             
             # Check file extension
-            valid_extensions = ['.mp4', '.webm', '.avi', '.mov', '.mkv', '.flv', '.m4v', '.mp3', '.m4a', '.wav', '.aac']
+            video_extensions = ['.mp4', '.webm', '.avi', '.mov', '.mkv', '.flv', '.m4v']
+            audio_extensions = ['.mp3', '.m4a', '.wav', '.aac', '.ogg', '.flac']
+            valid_extensions = video_extensions + audio_extensions
+            
             file_ext = os.path.splitext(file_path)[1].lower()
             
             if file_ext not in valid_extensions:
