@@ -1,26 +1,8 @@
-# Database Configuration - PostgreSQL (Elestio)
-DB_HOST=postgres-u39275.vm.elestio.app
-DB_PORT=25432
-POSTGRES1_DB=video_downloader
-POSTGRES1_USER=postgres
-POSTGRES1_PASSWORD=Dc8y1zsi-EAih-ojZwCiVI
-DB_SSL_MODE=require
-
-# MinIO Configuration
-MINIO_ENDPOINT=minio-u39275.vm.elestio.app:34256
-MINIO_ACCESS_KEY=root
-MINIO_SECRET_KEY=o86Lv2Ta-x1rk-SHd5RK0B
-MINIO_SECURE=true
-MINIO_BUCKET=video-downloads
-MINIO_URL_EXPIRY=43200
-
 # API Configuration
 API_HOST=0.0.0.0
 API_PORT=8000
 DEBUG=false
 
-# Download Configuration
-MAX_DOWNLOAD_SIZE=1073741824
-DOWNLOAD_TIMEOUT=600
-
-# Rate Limiting - Removed (RapidAPI handles rate limiting) 
+# Extraction Configuration
+EXTRACTION_TIMEOUT=30
+MAX_URL_LENGTH=2048 

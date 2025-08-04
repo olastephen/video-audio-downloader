@@ -1,286 +1,213 @@
-# Video Downloader API
+# Social Media Info Extractor API
 
-A powerful, production-ready API for downloading videos from various platforms with cloud storage integration.
+A lightweight, fast API to extract comprehensive metadata from social media posts across multiple platforms.
 
-## 🚀 Features
+## 🌟 Features
 
-- **Multi-Platform Support**: YouTube, Vimeo, Dailymotion, TikTok, Twitter/X, Reddit, Twitch, Instagram, Facebook
-- **Direct Video Downloads**: Support for direct video file URLs (.mp4, .avi, .mkv, etc.)
-- **Multiple Download Libraries**: yt-dlp, pytube, youtube-dl with intelligent fallback
-- **Cloud Storage**: Automatic upload to MinIO cloud storage with presigned URLs
-- **Background Processing**: Asynchronous downloads with real-time status updates
-- **Quality Selection**: Choose video quality and format
-- **Audio Extraction**: Download audio-only versions
-- **Progress Tracking**: Real-time download progress monitoring
-- **Rate Limiting**: Built-in rate limiting to prevent abuse
-- **Database Integration**: PostgreSQL support for persistent task storage
-- **Production Ready**: Docker support, health checks, and monitoring
+- **Multi-Platform Support**: TikTok, YouTube, Instagram, Facebook, Twitter/X, Reddit, Pinterest, and more
+- **Comprehensive Metadata**: Extract title, author, description, thumbnail, media URLs, and more
+- **No Downloads**: Pure information extraction - no files are downloaded or stored
+- **Fast & Efficient**: Optimized for quick metadata extraction (1-3 seconds)
+- **Ultra Lightweight**: No database or storage required - completely stateless
+- **RESTful API**: Clean, easy-to-use endpoints
 
-## 📋 Supported Platforms
+## 🚀 Supported Platforms
 
-### ✅ **Fully Supported**
-- **YouTube** - Full support with quality selection
-- **Vimeo** - High-quality video downloads
-- **Dailymotion** - Complete video extraction
-- **TikTok** - Video and audio downloads
-- **Twitter/X** - Video content extraction
-- **Reddit** - Video posts and comments
-- **Twitch** - Stream and clip downloads
-- **Instagram** - Posts, stories, and reels
-- **Facebook** - Video posts and stories
-- **Direct Video URLs** - Any direct video file link
+- **TikTok** - Videos, audio, thumbnails, metadata
+- **YouTube** - Videos, audio, thumbnails, metadata
+- **Instagram** - Posts, reels, stories, metadata
+- **Facebook** - Videos, posts, metadata
+- **Twitter/X** - Tweets, videos, images, metadata
+- **Reddit** - Posts, videos, images, metadata
+- **Pinterest** - Pins, images, metadata
+- **Snapchat** - Stories, snaps, metadata
+- **LinkedIn** - Posts, videos, metadata
+- **Twitch** - Streams, clips, metadata
+- **Vimeo** - Videos, metadata
+- **Dailymotion** - Videos, metadata
 
-### 🔧 **Technical Features**
-- **Multiple Download Engines**: yt-dlp, pytube, youtube-dl
-- **Intelligent Fallback**: Automatic switching between download methods
-- **Format Conversion**: MP4, WebM, AVI, MKV support
-- **Quality Options**: Best, worst, specific resolutions
-- **Subtitle Support**: Automatic subtitle downloads
-- **Metadata Extraction**: Title, duration, uploader info
+## 📋 API Endpoints
+
+### Extract Information
+```http
+POST /extract
+```
+
+**Request Body:**
+```json
+{
+  "url": "https://www.tiktok.com/@username/video/1234567890",
+  "include_media_urls": true,
+  "include_thumbnail": true,
+  "include_audio": false
+}
+```
+
+**Response:**
+```json
+{
+  "url": "https://www.tiktok.com/@username/video/1234567890",
+  "source": "tiktok",
+  "id": "1234567890",
+  "unique_id": "username",
+  "author": "username",
+  "title": "Amazing video title",
+  "description": "Video description...",
+  "thumbnail": "https://example.com/thumbnail.jpg",
+  "duration": 88447,
+  "view_count": 1000000,
+  "like_count": 50000,
+  "comment_count": 1000,
+  "share_count": 500,
+  "upload_date": "20240101",
+  "medias": [
+    {
+      "url": "https://example.com/video.mp4",
+      "data_size": 5466143,
+      "quality": "hd_no_watermark",
+      "extension": "mp4",
+      "type": "video",
+      "duration": 88447
+    }
+  ],
+  "type": "single",
+  "error": false,
+  "error_message": null,
+  "extraction_time": 1.234
+}
+```
+
+### Get Supported Platforms
+```http
+GET /platforms
+```
+
+### Health Check
+```http
+GET /health
+```
 
 ## 🛠️ Installation
 
 ### Prerequisites
 - Python 3.8+
-- PostgreSQL (optional, for production)
-- MinIO (optional, for cloud storage)
 
-### Quick Start
+### Setup
+
+1. **Clone the repository:**
 ```bash
-# Clone the repository
-git clone <repository-url>
-cd video-downloader
+git clone https://github.com/yourusername/social-media-info-extractor.git
+cd social-media-info-extractor
+```
 
-# Install dependencies
+2. **Install dependencies:**
+```bash
 pip install -r requirements.txt
+```
 
-# Start the API
+3. **Configure environment variables (optional):**
+```bash
+cp env_template.txt .env
+# Edit .env with your configuration
+```
+
+4. **Run the API:**
+```bash
 python main.py
 ```
 
-### Environment Configuration
-Create a `.env` file or set environment variables:
+## ⚙️ Configuration
 
-```bash
-# Database Configuration (Optional)
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=video_downloader
-DB_USER=video_downloader
-DB_PASSWORD=secure_password_123
+### Environment Variables
 
-# MinIO Configuration (Optional)
-MINIO_ENDPOINT=your-minio-endpoint:9000
-MINIO_ACCESS_KEY=your-access-key
-MINIO_SECRET_KEY=your-secret-key
-MINIO_SECURE=true
-MINIO_BUCKET=video-downloads
-MINIO_URL_EXPIRY=43200  # 12 hours in seconds (43200 = 12 * 60 * 60)
-
+```env
 # API Configuration
 API_HOST=0.0.0.0
 API_PORT=8000
 DEBUG=false
 
-# Download Configuration
-MAX_DOWNLOAD_SIZE=1073741824
-DOWNLOAD_TIMEOUT=300
-LOCAL_STORAGE_FALLBACK=true
+# Extraction Configuration
+EXTRACTION_TIMEOUT=30
+MAX_URL_LENGTH=2048
 ```
 
-## 🚀 Usage
+## 🔧 Usage Examples
 
-### API Endpoints
-
-#### 1. **Download Video**
-```http
-POST /download
-Content-Type: application/json
-
-{
-  "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-  "quality": "best",
-  "format": "mp4",
-  "audio_only": false
-}
-```
-
-**Response:**
-```json
-{
-  "task_id": "123e4567-e89b-12d3-a456-426614174000",
-  "status": "started",
-  "message": "Download task started successfully"
-}
-```
-
-#### 2. **Check Download Status**
-```http
-GET /status/{task_id}
-```
-
-**Response:**
-```json
-{
-  "task_id": "123e4567-e89b-12d3-a456-426614174000",
-  "status": "completed",
-  "progress": 100.0,
-  "filename": "Rick Astley - Never Gonna Give You Up.mp4",
-  "download_url": "https://minio.example.com/presigned-url",
-  "file_size": 5242880
-}
-```
-
-#### 3. **Download File**
-```http
-GET /download_file/{task_id}
-```
-
-**Note**: This endpoint redirects to a MinIO presigned URL that expires after 12 hours. The expiration time can be configured via the `MINIO_URL_EXPIRY` environment variable.
-
-#### 4. **Get Video Information**
-```http
-GET /video_info?url=https://www.youtube.com/watch?v=dQw4w9WgXcQ
-```
-
-#### 5. **MinIO Management**
-```http
-GET /minio/files                    # List all files
-DELETE /minio/files/{object_name}   # Delete specific file
-```
-
-### Example Usage
-
-#### Python Client
+### Python
 ```python
 import requests
 
-# Start download
-response = requests.post("http://localhost:8000/download", json={
-    "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-    "quality": "best",
-    "format": "mp4"
+# Extract information from TikTok
+response = requests.post("http://localhost:8000/extract", json={
+    "url": "https://www.tiktok.com/@username/video/1234567890",
+    "include_media_urls": True,
+    "include_thumbnail": True
 })
 
-task_id = response.json()["task_id"]
-
-# Check status
-status = requests.get(f"http://localhost:8000/status/{task_id}")
-print(status.json())
+data = response.json()
+print(f"Title: {data['title']}")
+print(f"Author: {data['author']}")
+print(f"Duration: {data['duration']} seconds")
 ```
 
-#### cURL Examples
-```bash
-# Download YouTube video
-curl -X POST "http://localhost:8000/download" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-    "quality": "best",
-    "format": "mp4"
-  }'
+### JavaScript/Node.js
+```javascript
+const response = await fetch('http://localhost:8000/extract', {
+    method: 'POST',
+    headers: {
+        'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+        url: 'https://www.tiktok.com/@username/video/1234567890',
+        include_media_urls: true,
+        include_thumbnail: true
+    })
+});
 
-# Check status
-curl "http://localhost:8000/status/{task_id}"
-
-# Download file
-curl "http://localhost:8000/download_file/{task_id}" -o video.mp4
+const data = await response.json();
+console.log(`Title: ${data.title}`);
+console.log(`Author: ${data.author}`);
 ```
 
-## 🐳 Docker Deployment
-
-### Using Docker Compose
+### cURL
 ```bash
-# Start with PostgreSQL and MinIO
+curl -X POST "http://localhost:8000/extract" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "url": "https://www.tiktok.com/@username/video/1234567890",
+       "include_media_urls": true,
+       "include_thumbnail": true
+     }'
+```
+
+## 🚀 Deployment
+
+### Docker
+```bash
+docker build -t social-media-info-extractor .
+docker run -p 8000:8000 social-media-info-extractor
+```
+
+### Docker Compose
+```bash
 docker-compose -f docker-compose.prod.yml up -d
-
-# Access services
-# API: http://localhost:8000
-# PostgreSQL: Direct connection to postgres-u39275.vm.elestio.app:5432
 ```
 
-### Manual Docker Build
-```bash
-# Build image
-docker build -t video-downloader .
+## 📈 Performance
 
-# Run container
-docker run -p 8000:8000 video-downloader
-```
+- **Extraction Time**: Typically 1-3 seconds per request
+- **Concurrent Requests**: No artificial limits
+- **Memory Usage**: Minimal (no file storage)
+- **Dependencies**: Only essential packages (6 total)
+- **Startup Time**: < 1 second
 
-## 📊 Database Integration
+## 🔒 Security
 
-The API supports PostgreSQL for persistent storage:
-
-- **Task Tracking**: All download tasks are stored in the database
-- **Status History**: Complete download history and statistics
-- **User Management**: Track downloads by client IP
-- **Cleanup**: Automatic cleanup of old tasks
-
-### Database Schema
-```sql
-CREATE TABLE download_tasks (
-    id SERIAL PRIMARY KEY,
-    task_id VARCHAR(255) UNIQUE NOT NULL,
-    url TEXT NOT NULL,
-    status VARCHAR(50) NOT NULL,
-    progress FLOAT DEFAULT 0.0,
-    filename TEXT,
-    download_url TEXT,
-    storage_type VARCHAR(50) DEFAULT 'local',
-    file_size BIGINT,
-    client_ip VARCHAR(45),
-    error TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-## 🔧 Configuration
-
-### Download Options
-- **Quality**: `best`, `worst`, `720p`, `1080p`, etc.
-- **Format**: `mp4`, `webm`, `avi`, `mkv`
-- **Audio Only**: Extract audio tracks only
-- **Subtitles**: Download available subtitles
-
-### Storage Options
-- **Local Storage**: Files stored on server disk
-- **MinIO Cloud**: Automatic upload to cloud storage
-- **Presigned URLs**: Secure, time-limited download links
-- **Cleanup**: Automatic local file cleanup
-
-## 🚨 Rate Limiting
-
-The API includes built-in rate limiting:
-- **10 requests per minute** per IP address
-- **Configurable limits** via environment variables
-- **Automatic blocking** of abusive clients
-
-## 🔍 Monitoring
-
-### Health Checks
-```http
-GET /health
-```
-
-### Statistics
-- Download success rates
-- Platform usage statistics
-- Storage utilization
-- Performance metrics
-
-## 🛡️ Security
-
-- **Input Validation**: All URLs and parameters validated
-- **File Type Checking**: Automatic file type verification
-- **Size Limits**: Configurable maximum file sizes
-- **Access Control**: IP-based rate limiting
-- **Secure URLs**: Time-limited presigned URLs
-
-## 📝 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
+- **No File Storage**: Only metadata extraction
+- **Input Validation**: URL validation and sanitization
+- **Rate Limiting**: Handled by RapidAPI (if deployed there)
+- **Stateless**: No persistent data storage
+- **No External Storage**: Completely self-contained
 
 ## 🤝 Contributing
 
@@ -290,13 +217,29 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 4. Add tests
 5. Submit a pull request
 
-## 📞 Support
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## 🆘 Support
 
 For support and questions:
 - Create an issue on GitHub
 - Check the documentation
-- Review the API logs
+- Review the API endpoints
 
----
+## 🔄 Changelog
 
-**Note**: This API is designed for legitimate video downloads. Please respect copyright laws and terms of service of video platforms. 
+### v2.0.0
+- Complete rewrite to focus on information extraction
+- Removed download functionality
+- Removed database dependencies
+- Removed MinIO storage dependencies
+- Added comprehensive metadata extraction
+- Improved platform detection
+- Enhanced error handling
+- Ultra lightweight and stateless design
+- Only 6 essential dependencies
+
+### v1.0.0
+- Initial release with download functionality 
