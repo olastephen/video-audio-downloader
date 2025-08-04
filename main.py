@@ -61,10 +61,22 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"Failed to initialize database: {e}")
     
+    # Start cleanup task
+    cleanup_task = asyncio.create_task(start_cleanup_task())
+    logger.info("Cleanup task started")
+    
     yield
     
     # Shutdown
     logger.info("Shutting down gracefully...")
+    
+    # Cancel cleanup task
+    cleanup_task.cancel()
+    try:
+        await cleanup_task
+    except asyncio.CancelledError:
+        logger.info("Cleanup task cancelled")
+    
     # Mark all ongoing tasks as cancelled
     for task_id in list(download_status.keys()):
         if download_status[task_id]['status'] in ['downloading', 'uploading']:
@@ -89,11 +101,7 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Start cleanup task when app starts
-@app.on_event("startup")
-async def startup_event():
-    """Startup event to initialize cleanup task"""
-    asyncio.create_task(start_cleanup_task())
+# Cleanup task is now handled in the lifespan context manager
 
 # Add CORS middleware
 app.add_middleware(
