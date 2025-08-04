@@ -443,8 +443,19 @@ async def root():
             "video_info": "/video_info",
             "minio_files": "/minio/files",
             "delete_minio_file": "/minio/files/{object_name}",
-            "system_status": "/system/status"
+            "system_status": "/system/status",
+            "health": "/health"
         }
+    }
+
+@app.get("/health")
+async def health_check():
+    """Simple health check endpoint"""
+    return {
+        "status": "healthy",
+        "timestamp": time.time(),
+        "database": DATABASE_AVAILABLE,
+        "minio": MINIO_AVAILABLE
     }
 
 @app.get("/system/status")
@@ -569,7 +580,9 @@ async def download_video(
 @app.get("/status/{task_id}", response_model=DownloadStatus)
 async def get_download_status(task_id: str):
     """Get the status of a download task"""
-    # First check in-memory status
+    import asyncio
+    
+    # First check in-memory status (fastest)
     if task_id in download_status:
         status_info = download_status[task_id]
         return DownloadStatus(
@@ -582,10 +595,14 @@ async def get_download_status(task_id: str):
             file_size=status_info.get('file_size')
         )
     
-    # If not in memory, check database
+    # If not in memory, check database with timeout
     if DATABASE_AVAILABLE:
         try:
-            db_task = await db_manager.get_task(task_id)
+            # Add timeout to prevent hanging
+            db_task = await asyncio.wait_for(
+                db_manager.get_task(task_id), 
+                timeout=5.0  # 5 second timeout
+            )
             if db_task:
                 return DownloadStatus(
                     task_id=task_id,
@@ -596,8 +613,18 @@ async def get_download_status(task_id: str):
                     download_url=db_task.download_url,
                     file_size=db_task.file_size
                 )
+        except asyncio.TimeoutError:
+            logger.error(f"Database timeout when getting task status for {task_id}")
+            raise HTTPException(
+                status_code=503, 
+                detail="Database query timeout. Please try again."
+            )
         except Exception as e:
-            logger.error(f"Database error when getting task status: {e}")
+            logger.error(f"Database error when getting task status for {task_id}: {e}")
+            raise HTTPException(
+                status_code=503, 
+                detail="Database error. Please try again."
+            )
     
     raise HTTPException(status_code=404, detail="Task not found")
 
@@ -609,18 +636,32 @@ async def download_file(task_id: str):
     if task_id in download_status:
         status_info = download_status[task_id]
     
-    # If not in memory, check database
+    # If not in memory, check database with timeout
     if not status_info and DATABASE_AVAILABLE:
         try:
-            db_task = await db_manager.get_task(task_id)
+            import asyncio
+            db_task = await asyncio.wait_for(
+                db_manager.get_task(task_id), 
+                timeout=5.0  # 5 second timeout
+            )
             if db_task:
                 status_info = {
                     'status': db_task.status,
                     'download_url': db_task.download_url,
                     'file_size': db_task.file_size
                 }
+        except asyncio.TimeoutError:
+            logger.error(f"Database timeout when getting task {task_id}")
+            raise HTTPException(
+                status_code=503, 
+                detail="Database query timeout. Please try again."
+            )
         except Exception as e:
-            logger.error(f"Database error when getting task: {e}")
+            logger.error(f"Database error when getting task {task_id}: {e}")
+            raise HTTPException(
+                status_code=503, 
+                detail="Database error. Please try again."
+            )
     
     if not status_info:
         raise HTTPException(status_code=404, detail="Task not found")
