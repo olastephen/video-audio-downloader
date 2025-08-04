@@ -132,6 +132,7 @@ class VideoRequest(BaseModel):
     quality: Optional[str] = "best"
     format: Optional[str] = "mp4"
     audio_only: Optional[bool] = False
+    direct_download: Optional[bool] = False
 
 class DownloadResponse(BaseModel):
     task_id: str
@@ -204,7 +205,7 @@ def progress_hook(d):
             download_status[task_id]['status'] = 'completed'
             download_status[task_id]['filename'] = d.get('filename', '')
 
-async def download_video_task(task_id: str, url: str, quality: str = "best", format: str = "mp4", audio_only: bool = False):
+async def download_video_task(task_id: str, url: str, quality: str = "best", format: str = "mp4", audio_only: bool = False, direct_download: bool = False):
     """Background task to download video"""
     logger.info(f"Using enhanced downloader for task {task_id}")
     
@@ -223,10 +224,10 @@ async def download_video_task(task_id: str, url: str, quality: str = "best", for
     try:
         # Use enhanced downloader
         if enhanced_downloader:
-            logger.info(f"Using enhanced downloader for task {task_id}")
+            logger.info(f"Using enhanced downloader for task {task_id} (direct_download: {direct_download})")
             try:
-                # Corrected call: enhanced_downloader.download_video now returns filepath directly
-                filepath = enhanced_downloader.download_video(url, quality, format, audio_only)
+                # Pass direct_download parameter to enhanced downloader
+                filepath = enhanced_downloader.download_video(url, quality, format, audio_only, direct_download)
                 downloaded_file = filepath
             except Exception as e:
                 logger.error(f"Enhanced downloader error: {e}")
@@ -395,7 +396,15 @@ async def download_video(
     background_tasks: BackgroundTasks,
     client_ip: str = None
 ):
-    """Start a video download task"""
+    """Start a video download task
+    
+    Parameters:
+    - url: The video URL to download
+    - quality: Video quality (best, worst, or custom format string)
+    - format: Output format (mp4, webm, etc.)
+    - audio_only: If True, download audio only
+    - direct_download: If True, skip site-specific handlers and use direct download only
+    """
     try:
         # Rate limiting (if client_ip provided)
         if client_ip and not check_rate_limit(client_ip):
@@ -447,7 +456,8 @@ async def download_video(
             url,
             request.quality,
             request.format,
-            request.audio_only
+            request.audio_only,
+            request.direct_download
         )
         
         # Return immediately

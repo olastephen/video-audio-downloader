@@ -88,33 +88,69 @@ class EnhancedVideoDownloader:
         """Detect the platform from URL"""
         url_lower = url.lower()
         
-        # Direct video files
+        # Direct video files (only for direct_download mode)
         if any(ext in url_lower for ext in ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.3gp']):
             return 'direct_video'
         
-        # Social media platforms
+        # Major social media platforms
         if 'youtube.com' in url_lower or 'youtu.be' in url_lower:
             return 'youtube'
         elif 'vimeo.com' in url_lower:
             return 'vimeo'
-        elif 'dailymotion.com' in url_lower:
+        elif 'dailymotion.com' in url_lower or 'dai.ly' in url_lower:
             return 'dailymotion'
-        elif 'tiktok.com' in url_lower:
+        elif 'tiktok.com' in url_lower or 'vm.tiktok.com' in url_lower:
             return 'tiktok'
-        elif 'twitter.com' in url_lower or 'x.com' in url_lower:
+        elif 'twitter.com' in url_lower or 'x.com' in url_lower or 't.co' in url_lower:
             return 'twitter'
-        elif 'reddit.com' in url_lower:
+        elif 'reddit.com' in url_lower or 'redd.it' in url_lower:
             return 'reddit'
         elif 'twitch.tv' in url_lower:
             return 'twitch'
-        elif 'instagram.com' in url_lower:
+        elif 'instagram.com' in url_lower or 'instagr.am' in url_lower:
             return 'instagram'
-        elif 'facebook.com' in url_lower:
+        elif 'facebook.com' in url_lower or 'fb.com' in url_lower or 'fb.watch' in url_lower:
             return 'facebook'
+        elif 'linkedin.com' in url_lower:
+            return 'linkedin'
+        elif 'snapchat.com' in url_lower:
+            return 'snapchat'
+        elif 'pinterest.com' in url_lower:
+            return 'pinterest'
+        elif 'tumblr.com' in url_lower:
+            return 'tumblr'
+        elif 'discord.com' in url_lower or 'discord.gg' in url_lower:
+            return 'discord'
+        elif 'telegram.org' in url_lower or 't.me' in url_lower:
+            return 'telegram'
         
-        # Known video platforms
-        elif any(site in url_lower for site in ['bilibili', 'nicovideo', 'rutube', 'vk.com', 'ok.ru']):
-            return 'generic_video'
+        # Video hosting platforms
+        elif 'bilibili.com' in url_lower or 'b23.tv' in url_lower:
+            return 'bilibili'
+        elif 'nicovideo.jp' in url_lower:
+            return 'nicovideo'
+        elif 'rutube.ru' in url_lower:
+            return 'rutube'
+        elif 'vk.com' in url_lower:
+            return 'vk'
+        elif 'ok.ru' in url_lower:
+            return 'okru'
+        elif 'niconico.jp' in url_lower:
+            return 'niconico'
+        elif 'peertube' in url_lower:
+            return 'peertube'
+        elif 'odysee.com' in url_lower:
+            return 'odysee'
+        elif 'lbry.com' in url_lower:
+            return 'lbry'
+        elif 'rumble.com' in url_lower:
+            return 'rumble'
+        elif 'brighteon.com' in url_lower:
+            return 'brighteon'
+        elif 'bitchute.com' in url_lower:
+            return 'bitchute'
+        elif 'minds.com' in url_lower:
+            return 'minds'
         
         # If it's a web URL but not a known platform, treat as generic
         elif url_lower.startswith(('http://', 'https://')):
@@ -124,7 +160,7 @@ class EnhancedVideoDownloader:
     
     def get_yt_dlp_opts(self, quality: str = "best", format: str = "mp4", 
                        audio_only: bool = False, progress_hook=None) -> Dict[str, Any]:
-        """Get yt-dlp options with enhanced settings"""
+        """Get yt-dlp options with enhanced settings for social media platforms"""
         opts = {
             'outtmpl': str(self.download_dir / '%(title)s.%(ext)s'),
             'noplaylist': True,
@@ -139,6 +175,28 @@ class EnhancedVideoDownloader:
             'http_chunk_size': 10485760,  # 10MB chunks
             'buffersize': 1024,
             'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            # Enhanced social media compatibility
+            'cookiesfrombrowser': ('chrome',),  # Use cookies from Chrome
+            'cookiefile': None,  # Allow cookie file if available
+            'extract_flat': False,
+            'writeinfojson': False,
+            'writesubtitles': False,
+            'writeautomaticsub': False,
+            'skip_download': False,
+            'verbose': False,
+            # Better error handling
+            'ignore_no_formats_error': True,
+            'no_warnings': False,
+            # Enhanced headers for social media
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Accept-Encoding': 'gzip, deflate',
+                'DNT': '1',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+            }
         }
         
         if progress_hook:
@@ -162,6 +220,82 @@ class EnhancedVideoDownloader:
                 opts['format'] = quality
         
         return opts
+    
+    def get_platform_specific_opts(self, platform: str, quality: str = "best", format: str = "mp4", audio_only: bool = False) -> Dict[str, Any]:
+        """Get platform-specific yt-dlp options for better social media compatibility"""
+        base_opts = self.get_yt_dlp_opts(quality, format, audio_only)
+        
+        platform_specific = {
+            'youtube': {
+                'extractor_args': {
+                    'youtube': {
+                        'skip': ['dash', 'live'],
+                        'player_client': ['android', 'web'],
+                        'player_skip': ['webpage', 'configs'],
+                    }
+                }
+            },
+            'tiktok': {
+                'extractor_args': {
+                    'tiktok': {
+                        'api_hostname': 'api16-normal-c-useast1a.tiktokv.com',
+                        'app_version': '1.0.0',
+                        'manifest_app_version': '1.0.0',
+                    }
+                }
+            },
+            'instagram': {
+                'extractor_args': {
+                    'instagram': {
+                        'login': None,
+                        'password': None,
+                    }
+                }
+            },
+            'twitter': {
+                'extractor_args': {
+                    'twitter': {
+                        'api_hostname': 'api.twitter.com',
+                    }
+                }
+            },
+            'facebook': {
+                'extractor_args': {
+                    'facebook': {
+                        'login': None,
+                        'password': None,
+                    }
+                }
+            },
+            'reddit': {
+                'extractor_args': {
+                    'reddit': {
+                        'client_id': None,
+                        'client_secret': None,
+                    }
+                }
+            },
+            'twitch': {
+                'extractor_args': {
+                    'twitch': {
+                        'client_id': None,
+                        'client_secret': None,
+                    }
+                }
+            },
+            'vimeo': {
+                'extractor_args': {
+                    'vimeo': {
+                        'access_token': None,
+                    }
+                }
+            }
+        }
+        
+        if platform in platform_specific:
+            base_opts.update(platform_specific[platform])
+        
+        return base_opts
     
     def download_with_yt_dlp(self, url: str, quality: str = "best", format: str = "mp4", audio_only: bool = False) -> str:
         """Download using yt-dlp with enhanced options"""
@@ -489,52 +623,78 @@ class EnhancedVideoDownloader:
             logger.error(f"Generic video download failed: {e}")
             raise
 
-    def download_video(self, url: str, quality: str = "best", format: str = "mp4", audio_only: bool = False) -> str:
-        """Download video using multiple methods with fallback"""
+    def download_video(self, url: str, quality: str = "best", format: str = "mp4", audio_only: bool = False, direct_download: bool = False) -> str:
+        """Download video using multiple social media downloaders with fallback"""
         platform = self.detect_platform(url)
-        logger.info(f"Detected platform: {platform} for URL: {url}")
+        logger.info(f"Detected platform: {platform} for URL: {url} (direct_download: {direct_download})")
         
-        # Method 1: Direct video download (only for actual video files)
-        if platform == 'direct_video':
+        # If direct_download is explicitly requested, use direct download only
+        if direct_download:
+            logger.info("Direct download requested - using direct download only")
             try:
                 logger.info("Attempting direct video download...")
                 return self.download_direct_video(url)
             except Exception as e:
                 logger.warning(f"Direct video download failed: {e}")
+                raise Exception(f"Direct download failed for URL: {url}")
         
-        # Method 2: yt-dlp with enhanced options
+        # Method 1: yt-dlp (primary method for all social media platforms)
         try:
-            logger.info("Attempting download with yt-dlp...")
+            logger.info("Attempting download with yt-dlp (primary method)...")
             return self.download_with_yt_dlp(url, quality, format, audio_only)
         except Exception as e:
             logger.warning(f"yt-dlp download failed: {e}")
         
-        # Method 3: pytube (for YouTube)
+        # Method 2: Platform-specific fallbacks
         if platform == 'youtube':
             try:
-                logger.info("Attempting download with pytube...")
+                logger.info("Attempting YouTube-specific download with pytube...")
                 return self.download_with_pytube(url, quality, format, audio_only)
             except Exception as e:
                 logger.warning(f"pytube download failed: {e}")
         
-        # Method 4: Generic downloader for unknown platforms
-        if platform == 'unknown' or platform == 'generic_video':
+        # Method 2.5: Platform-specific yt-dlp options for better compatibility
+        try:
+            logger.info(f"Attempting platform-specific yt-dlp download for {platform}...")
+            platform_opts = self.get_platform_specific_opts(platform, quality, format, audio_only)
+            if platform_opts:
+                with yt_dlp.YoutubeDL(platform_opts) as ydl:
+                    ydl.download([url])
+                    # Get the downloaded file
+                    info = ydl.extract_info(url, download=False)
+                    title = info.get('title', 'unknown_title')
+                    ext = info.get('ext', format or 'mp4')
+                    filename = f"{title}.{ext}"
+                    filepath = self.download_dir / filename
+                    
+                    if filepath.exists():
+                        logger.info(f"Successfully downloaded with platform-specific yt-dlp: {filename}")
+                        return str(filepath)
+        except Exception as e:
+            logger.warning(f"Platform-specific yt-dlp download failed: {e}")
+        
+        # Method 3: youtube-dl as secondary fallback
+        if YOUTUBE_DL_AVAILABLE:
             try:
-                logger.info("Attempting generic video download...")
+                logger.info("Attempting download with youtube-dl (secondary fallback)...")
+                success, filepath, error = self.download_with_youtube_dl(url, quality, format, audio_only)
+                if success:
+                    return filepath
+                else:
+                    logger.warning(f"youtube-dl download failed: {error}")
+            except Exception as e:
+                logger.warning(f"youtube-dl download failed: {e}")
+        
+        # Method 4: Generic video downloader for unknown platforms
+        if platform in ['unknown', 'generic_video'] or platform not in ['direct_video']:
+            try:
+                logger.info("Attempting generic video download for unknown platform...")
                 return self.download_generic_video(url, quality, format, audio_only)
             except Exception as e:
                 logger.warning(f"Generic video download failed: {e}")
         
-        # Method 5: Direct video as last resort (only for non-HTML URLs)
-        if not any(html_indicator in url.lower() for html_indicator in ['html', 'htm', 'php', 'asp', 'jsp']):
-            try:
-                logger.info("Attempting direct video download as last resort...")
-                return self.download_direct_video(url)
-            except Exception as e:
-                logger.warning(f"Direct video fallback failed: {e}")
-        
-        # If all methods fail
-        raise Exception(f"All download methods failed for URL: {url}")
+        # If all social media downloaders fail
+        raise Exception(f"All social media download methods failed for URL: {url}. Platform: {platform}")
     
     def get_video_info(self, url: str) -> Dict[str, Any]:
         """Get video information without downloading"""
