@@ -194,7 +194,7 @@ docker-compose -f docker-compose.prod.yml up -d
 
 # Access services
 # API: http://localhost:8000
-# DBGate: http://localhost:3000
+# PostgreSQL: Direct connection to postgres-u39275.vm.elestio.app:5432
 ```
 
 ### Manual Docker Build

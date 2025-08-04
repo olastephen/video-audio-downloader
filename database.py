@@ -22,17 +22,17 @@ try:
     ALLOW_SQLITE_FALLBACK = Config.ALLOW_SQLITE_FALLBACK
     logger.info(f"Using Config: {DB_HOST}:{DB_PORT}/{DB_NAME}")
 except ImportError:
-    DB_HOST = os.getenv('DB_HOST', 'dbgate-u39275.vm.elestio.app')  # Elestio DbGate host
-    DB_PORT = os.getenv('DB_PORT', '40211')  # PostgreSQL port from Docker Compose
+    DB_HOST = os.getenv('DB_HOST', 'postgres-u39275.vm.elestio.app')  # Elestio PostgreSQL host
+    DB_PORT = os.getenv('DB_PORT', '25432')  # Elestio PostgreSQL port
     DB_NAME = os.getenv('POSTGRES1_DB', 'video_downloader')  # Database name
-    DB_USER = os.getenv('POSTGRES1_USER', 'postgres')  # DbGate postgres user
-    DB_PASSWORD = os.getenv('POSTGRES1_PASSWORD', 'G5oRd5V2-fPR7-XUyvX6VG')  # DbGate postgres password
+    DB_USER = os.getenv('POSTGRES1_USER', 'postgres')  # PostgreSQL user
+    DB_PASSWORD = os.getenv('POSTGRES1_PASSWORD', 'Dc8y1zsi-EAih-ojZwCiVI')  # PostgreSQL password
     ALLOW_SQLITE_FALLBACK = os.getenv('ALLOW_SQLITE_FALLBACK', 'false').lower() == 'true'
     logger.warning("Config not available, using fallback database configuration")
 
 # Validate database URL (ensure port is not empty)
 if not DB_PORT or DB_PORT == '':
-    DB_PORT = '40211'  # Default to Docker Compose port
+    DB_PORT = '25432'  # Default to Elestio PostgreSQL port
 
 # Enable PostgreSQL connection with fallback
 USE_POSTGRESQL = True # Always use PostgreSQL
@@ -53,7 +53,8 @@ if USE_POSTGRESQL:
             connect_args={
                 "server_settings": {
                     "application_name": "video_downloader_api"
-                }
+                },
+                "ssl": "require"
             }
         )
         logger.info("PostgreSQL engine created successfully")
@@ -156,7 +157,8 @@ class DatabaseManager:
                     port=DB_PORT,
                     user=DB_USER,
                     password=DB_PASSWORD,
-                    database='postgres'
+                    database='postgres',
+                    sslmode='require'
                 )
                 conn.autocommit = True
                 cursor = conn.cursor()

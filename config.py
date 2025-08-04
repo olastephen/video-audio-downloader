@@ -7,12 +7,13 @@ load_dotenv()
 class Config:
     """Configuration class for the Video Downloader API"""
     
-    # Database Configuration
-    DB_HOST = os.getenv('DB_HOST', 'dbgate-u39275.vm.elestio.app')  # Elestio DbGate host
-    DB_PORT = os.getenv('DB_PORT', '40211')  # PostgreSQL port from Docker Compose
+    # Database Configuration - Pure PostgreSQL (Elestio)
+    DB_HOST = os.getenv('DB_HOST', 'postgres-u39275.vm.elestio.app')  # Elestio PostgreSQL host
+    DB_PORT = os.getenv('DB_PORT', '25432')  # Elestio PostgreSQL port
     DB_NAME = os.getenv('POSTGRES1_DB', 'video_downloader')  # Database name
-    DB_USER = os.getenv('POSTGRES1_USER', 'postgres')  # DbGate postgres user
-    DB_PASSWORD = os.getenv('POSTGRES1_PASSWORD', 'G5oRd5V2-fPR7-XUyvX6VG')  # DbGate postgres password
+    DB_USER = os.getenv('POSTGRES1_USER', 'postgres')  # PostgreSQL user
+    DB_PASSWORD = os.getenv('POSTGRES1_PASSWORD', 'Dc8y1zsi-EAih-ojZwCiVI')  # PostgreSQL password
+    DB_SSL_MODE = os.getenv('DB_SSL_MODE', 'require')  # SSL mode for secure connections (working with Elestio)
     ALLOW_SQLITE_FALLBACK = os.getenv('ALLOW_SQLITE_FALLBACK', 'false').lower() == 'true'  # Disable for production
     
     # MinIO Configuration
@@ -39,7 +40,7 @@ class Config:
     @classmethod
     def get_database_url(cls):
         """Get the database URL for SQLAlchemy"""
-        return f"postgresql+asyncpg://{cls.DB_USER}:{cls.DB_PASSWORD}@{cls.DB_HOST}:{cls.DB_PORT}/{cls.DB_NAME}"
+        return f"postgresql+asyncpg://{cls.DB_USER}:{cls.DB_PASSWORD}@{cls.DB_HOST}:{cls.DB_PORT}/{cls.DB_NAME}?sslmode={cls.DB_SSL_MODE}"
     
     @classmethod
     def print_config(cls):

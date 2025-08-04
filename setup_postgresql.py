@@ -148,7 +148,7 @@ def main():
         print("\n📖 Next steps:")
         print("1. Install dependencies: pip install -r requirements.txt")
         print("2. Start the API: python main.py")
-        print("3. Connect DBGate to your PostgreSQL database")
+        print("3. Connect directly to your PostgreSQL database")
     else:
         sys.exit(1)
 

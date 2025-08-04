@@ -57,19 +57,7 @@ services:
       timeout: 10s
       retries: 3
 
-  # DBGate for database management
-  dbgate:
-    image: dbgate/dbgate:latest
-    container_name: video-downloader-dbgate
-    environment:
-      - CONNECTIONS=postgres://video_downloader:secure_password_123@postgres:5432/video_downloader
-    ports:
-      - "3000:3000"
-    networks:
-      - video-downloader-network
-    depends_on:
-      - postgres
-    restart: unless-stopped
+  # Note: DBGate removed - using direct PostgreSQL connection
 
 volumes:
   postgres_data:
